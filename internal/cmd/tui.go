@@ -1,24 +1,24 @@
 package cmd
 
 import (
-    "context"
-    "fmt"
-    "io"
-    "os"
-    "sort"
-    "strings"
-    "sync"
-    "time"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strings"
+	"sync"
+	"time"
 
-    "golang.org/x/term"
+	"golang.org/x/term"
 
-    "github.com/adrianmross/oci-context/pkg/config"
-    "github.com/adrianmross/oci-context/pkg/oci"
-    "github.com/adrianmross/oci-context/pkg/ocicfg"
-    "github.com/charmbracelet/bubbles/list"
-    tea "github.com/charmbracelet/bubbletea"
-    "github.com/charmbracelet/lipgloss"
-    "github.com/spf13/cobra"
+	"github.com/adrianmross/oci-context/pkg/config"
+	"github.com/adrianmross/oci-context/pkg/oci"
+	"github.com/adrianmross/oci-context/pkg/ocicfg"
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -129,9 +129,9 @@ func newTuiCmd() *cobra.Command {
 	var cfgPath string
 	var useGlobal bool
 	cmd := &cobra.Command{
-        Use:   "tui [mode]",
+		Use:   "tui [mode]",
 		Short: "Interactive context picker with compartment selection",
-        Args:  cobra.MaximumNArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useGlobal, err := cmd.Flags().GetBool("global")
 			if err != nil {
@@ -146,7 +146,7 @@ func newTuiCmd() *cobra.Command {
 				return err
 			}
 			profiles, perr := ocicfg.LoadProfiles(cfg.Options.OCIConfigPath)
-            items := contextsFromProfiles(profiles)
+			items := contextsFromProfiles(profiles)
 			if perr != nil || len(items) == 0 {
 				// fallback to stored contexts if profile parsing fails or yields none
 				items = make([]list.Item, 0, len(cfg.Contexts))
@@ -154,12 +154,12 @@ func newTuiCmd() *cobra.Command {
 					items = append(items, contextItem{ctx})
 				}
 			}
-            startMode := ""
-            if len(args) == 1 {
-                startMode = args[0]
-            }
-            m := newTuiModel(cfg, path, items, profiles, startMode)
-            p := tea.NewProgram(m)
+			startMode := ""
+			if len(args) == 1 {
+				startMode = args[0]
+			}
+			m := newTuiModel(cfg, path, items, profiles, startMode)
+			p := tea.NewProgram(m)
 			finalModel, err := p.Run()
 			if err != nil {
 				return err
@@ -501,7 +501,7 @@ type tuiModel struct {
 	regionCache        map[string][]string // context name -> regions
 	pendingSelectionID string              // compartment pending ID
 	pendingRegion      string              // region pending name
-    initCmd            tea.Cmd             // optional startup command for shortcut modes
+	initCmd            tea.Cmd             // optional startup command for shortcut modes
 }
 
 func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles map[string]ocicfg.Profile, startMode string) tuiModel {
@@ -548,72 +548,72 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	rl := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	rl.Title = "Select region"
 	rl.SetFilteringEnabled(true)
-    m := tuiModel{list: l, tenancies: tn, cfg: cfg, cfgPath: cfgPath, mode: "contexts", profiles: profiles, comps: cl, regions: rl, compCache: make(map[string][]compItem), parentMap: make(map[string]string), nameMap: make(map[string]string), regionCache: make(map[string][]string)}
+	m := tuiModel{list: l, tenancies: tn, cfg: cfg, cfgPath: cfgPath, mode: "contexts", profiles: profiles, comps: cl, regions: rl, compCache: make(map[string][]compItem), parentMap: make(map[string]string), nameMap: make(map[string]string), regionCache: make(map[string][]string)}
 	// attach delegates that can highlight pending selection when space is pressed
 	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID))
 	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion))
-    m.applyStartMode(startMode)
-    return m
+	m.applyStartMode(startMode)
+	return m
 }
 
 // selectInitialContext picks the current context if present, else the first context item.
 func selectInitialContext(items []list.Item, current string) (contextItem, bool) {
-    if current != "" {
-        for _, it := range items {
-            if ci, ok := it.(contextItem); ok && ci.Name == current {
-                return ci, true
-            }
-        }
-    }
-    for _, it := range items {
-        if ci, ok := it.(contextItem); ok {
-            return ci, true
-        }
-    }
-    return contextItem{}, false
+	if current != "" {
+		for _, it := range items {
+			if ci, ok := it.(contextItem); ok && ci.Name == current {
+				return ci, true
+			}
+		}
+	}
+	for _, it := range items {
+		if ci, ok := it.(contextItem); ok {
+			return ci, true
+		}
+	}
+	return contextItem{}, false
 }
 
 // applyStartMode primes the model for the requested starting menu (contexts/compartments/regions/tenancies).
 func (m *tuiModel) applyStartMode(startMode string) {
-    mode := strings.ToLower(strings.TrimSpace(startMode))
-    switch mode {
-    case "", "context", "contexts":
-        // default: nothing to do
-        return
-    case "region", "regions":
-        if ctx, ok := selectInitialContext(m.list.Items(), m.cfg.CurrentContext); ok {
-            m.ctxItem = ctx
-            m.mode = "regions"
-            m.status = "Loading regions..."
-            m.initCmd = m.loadRegionsCmd(ctx)
-            return
-        }
-    case "compartment", "compartments":
-        if ctx, ok := selectInitialContext(m.list.Items(), m.cfg.CurrentContext); ok {
-            m.ctxItem = ctx
-            parent := ctx.CompartmentOCID
-            if parent == "" {
-                parent = ctx.TenancyOCID
-            }
-            m.parentID = parent
-            m.parentCrumb = parentLabel(parent, ctx)
-            m.parentMap[parent] = ctx.TenancyOCID
-            m.nameMap[parent] = m.parentCrumb
-            m.nameMap[ctx.TenancyOCID] = parentLabel(ctx.TenancyOCID, ctx)
-            m.mode = "compartments"
-            m.status = "Loading compartments..."
-            m.crumb = fmt.Sprintf("Current: %s (%s)", m.parentCrumb, parent)
-            m.initCmd = m.loadCompsCmd(parent)
-            return
-        }
-    case "tenancy", "tenancies":
-        if len(m.tenancies.Items()) > 0 {
-            m.mode = "tenancies"
-            m.status = "Select tenancy (Enter to use a profile and open root)"
-            return
-        }
-    }
-    // fallback if no contexts/tenancies available: stay in default mode
+	mode := strings.ToLower(strings.TrimSpace(startMode))
+	switch mode {
+	case "", "context", "contexts":
+		// default: nothing to do
+		return
+	case "region", "regions":
+		if ctx, ok := selectInitialContext(m.list.Items(), m.cfg.CurrentContext); ok {
+			m.ctxItem = ctx
+			m.mode = "regions"
+			m.status = "Loading regions..."
+			m.initCmd = m.loadRegionsCmd(ctx)
+			return
+		}
+	case "compartment", "compartments":
+		if ctx, ok := selectInitialContext(m.list.Items(), m.cfg.CurrentContext); ok {
+			m.ctxItem = ctx
+			parent := ctx.CompartmentOCID
+			if parent == "" {
+				parent = ctx.TenancyOCID
+			}
+			m.parentID = parent
+			m.parentCrumb = parentLabel(parent, ctx)
+			m.parentMap[parent] = ctx.TenancyOCID
+			m.nameMap[parent] = m.parentCrumb
+			m.nameMap[ctx.TenancyOCID] = parentLabel(ctx.TenancyOCID, ctx)
+			m.mode = "compartments"
+			m.status = "Loading compartments..."
+			m.crumb = fmt.Sprintf("Current: %s (%s)", m.parentCrumb, parent)
+			m.initCmd = m.loadCompsCmd(parent)
+			return
+		}
+	case "tenancy", "tenancies":
+		if len(m.tenancies.Items()) > 0 {
+			m.mode = "tenancies"
+			m.status = "Select tenancy (Enter to use a profile and open root)"
+			return
+		}
+	}
+	// fallback if no contexts/tenancies available: stay in default mode
 }
 
 // goUpOne navigates to the known parent using recorded parent relationships.
@@ -642,7 +642,7 @@ func (m tuiModel) goUpOne() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) Init() tea.Cmd {
-    return m.initCmd
+	return m.initCmd
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

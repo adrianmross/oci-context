@@ -41,14 +41,14 @@ func newAddCmd() *cobra.Command {
 		},
 	}
 
-    cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
-    cmd.Flags().StringVarP(&ctx.Name, "name", "n", "", "Context name")
-    cmd.Flags().StringVarP(&ctx.Profile, "profile", "p", "", "OCI CLI profile")
-    cmd.Flags().StringVarP(&ctx.TenancyOCID, "tenancy", "t", "", "Tenancy OCID")
-    cmd.Flags().StringVarP(&ctx.CompartmentOCID, "compartment", "m", "", "Compartment OCID")
-    cmd.Flags().StringVarP(&ctx.Region, "region", "r", "", "OCI region")
-    cmd.Flags().StringVarP(&ctx.User, "user", "u", "", "User hint")
-    cmd.Flags().StringVarP(&ctx.Notes, "notes", "N", "", "Notes")
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVarP(&ctx.Name, "name", "n", "", "Context name")
+	cmd.Flags().StringVarP(&ctx.Profile, "profile", "p", "", "OCI CLI profile")
+	cmd.Flags().StringVarP(&ctx.TenancyOCID, "tenancy", "t", "", "Tenancy OCID")
+	cmd.Flags().StringVarP(&ctx.CompartmentOCID, "compartment", "m", "", "Compartment OCID")
+	cmd.Flags().StringVarP(&ctx.Region, "region", "r", "", "OCI region")
+	cmd.Flags().StringVarP(&ctx.User, "user", "u", "", "User hint")
+	cmd.Flags().StringVarP(&ctx.Notes, "notes", "N", "", "Notes")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("profile")

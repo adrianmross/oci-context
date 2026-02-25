@@ -38,7 +38,7 @@ func TestTUIQuitSavesOnQ(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")
-    m := newTuiModel(cfg, cfgPath, []list.Item{ci}, nil, "")
+	m := newTuiModel(cfg, cfgPath, []list.Item{ci}, nil, "")
 
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	res := model.(tuiModel)
@@ -62,7 +62,7 @@ func TestTUIEscQuitsWithoutSave(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")
-    m := newTuiModel(cfg, cfgPath, []list.Item{ci}, nil, "")
+	m := newTuiModel(cfg, cfgPath, []list.Item{ci}, nil, "")
 
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	res := model.(tuiModel)
@@ -81,7 +81,7 @@ func TestTUIFilteringGuardsHotkeys(t *testing.T) {
 		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
 		Contexts: []config.Context{ci.Context},
 	}
-    m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
 	// put contexts list into filtering mode
 	m.list.SetFilteringEnabled(true)
 	m.list.SetFilterState(list.Filtering)
@@ -103,7 +103,7 @@ func TestTUIEnterAppliesFilterAndExits(t *testing.T) {
 		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
 		Contexts: []config.Context{ci.Context},
 	}
-    m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
 	m.list.SetFilteringEnabled(true)
 	m.list.SetFilterState(list.Filtering)
 
@@ -124,7 +124,7 @@ func TestTUISpaceStagesCompartment(t *testing.T) {
 		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
 		Contexts: []config.Context{ci.Context},
 	}
-    m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
 	// move to compartments mode with one item selected
 	m.mode = "compartments"
 	comp := compItem{oc: oci.Compartment{ID: "ocid1.compartment.oc1..child", Name: "child", Parent: ci.TenancyOCID, Status: "ACTIVE"}}
@@ -148,7 +148,7 @@ func TestTUISpaceStagesRegion(t *testing.T) {
 		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
 		Contexts: []config.Context{ci.Context},
 	}
-    m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
 	m.mode = "regions"
 	m.regions.SetItems(toRegionList([]string{"us-phoenix-1", "us-ashburn-1"}))
 	m.regions.Select(1) // select us-ashburn-1

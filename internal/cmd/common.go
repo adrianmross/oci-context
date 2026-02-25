@@ -7,14 +7,14 @@ import (
 
 // resolveConfigPath returns the config path based on flags and project discovery.
 // Priority:
-// 1) explicit --config
-// 2) if global flag set -> ~/.oci-context/config.yml
-// 3) project-local configs (in order):
-//    ./.oci-context.yml, ./.oci-context.json,
-//    ./.oci-context/config.yml, ./.oci-context/config.json,
-//    ./oci-context.yml, ./oci-context.json,
-//    ./oci-context/config.yml, ./oci-context/config.json
-// 4) fallback to ~/.oci-context/config.yml
+//  1. explicit --config
+//  2. if global flag set -> ~/.oci-context/config.yml
+//  3. project-local configs (in order):
+//     ./.oci-context.yml, ./.oci-context.json,
+//     ./.oci-context/config.yml, ./.oci-context/config.json,
+//     ./oci-context.yml, ./oci-context.json,
+//     ./oci-context/config.yml, ./oci-context/config.json
+//  4. fallback to ~/.oci-context/config.yml
 func resolveConfigPath(cfg string, global bool) (string, error) {
 	if cfg != "" {
 		return cfg, nil
