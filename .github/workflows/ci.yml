@@ -51,8 +51,6 @@ jobs:
 
       - name: actionlint
         uses: docker://rhysd/actionlint:latest
-        with:
-          args: actionlint
 
       - name: Upload test artifacts on failure
         if: failure()
