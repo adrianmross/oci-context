@@ -33,8 +33,7 @@ jobs:
 
       - name: Go fmt
         run: |
-          files=$(find . -name '*.go' -not -path './vendor/*')
-          gofmt -w "${files}"
+          find . -name '*.go' -not -path './vendor/*' -print0 | xargs -0 gofmt -w
           git diff --exit-code
 
       - name: Go vet
