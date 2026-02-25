@@ -33,8 +33,15 @@ jobs:
 
       - name: Go fmt
         run: |
-          find . -name '*.go' -not -path './vendor/*' -print0 | xargs -0 gofmt -w
-          git diff --exit-code
+          set -euo pipefail
+          fmt_files=$(find . -name '*.go' -not -path './vendor/*' -print0 | xargs -0 gofmt -l)
+
+          if [ -n "$fmt_files" ]; then
+            echo "The following files are not gofmt'd:" >&2
+            echo "$fmt_files" >&2
+            echo "Run 'gofmt -w' locally before pushing." >&2
+            exit 1
+          fi
 
       - name: Go vet
         run: go vet ./...
