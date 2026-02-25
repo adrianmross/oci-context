@@ -130,3 +130,50 @@ Errors:
 
 ## Status
 Work in progress.
+
+---
+
+## Development and CI/CD
+
+### Local prerequisites
+- Go (from `go.mod` go version; currently 1.25.6)
+- `actionlint` (for workflow linting): `brew install actionlint` **or** `go install github.com/rhysd/actionlint/cmd/actionlint@latest`
+- `act` (for local workflow dry runs): `brew install act` **or** `go install github.com/nektos/act@latest`
+
+Check tool availability:
+```sh
+make tools
+```
+
+### Local validation
+Runs formatting, vet, tests, actionlint, and an `act` dry run against a sample PR payload:
+```sh
+make validate
+```
+Targets:
+- `make fmt`
+- `make vet`
+- `make test`
+- `make lint-workflows`
+- `make validate-workflows` (uses `.github/testdata/pull_request.json`)
+
+### GitHub Actions workflows
+- **CI** (`.github/workflows/ci.yml`): on push/PR to main/develop/release/**; runs gofmt (checks diff), go vet, go test, actionlint.
+- **Release** (`.github/workflows/release.yml`): on tag `v*` or manual dispatch; runs tests, builds binaries, creates GitHub Release with artifacts.
+- **CD** (`.github/workflows/cd.yml`): manual `workflow_dispatch` with `env` input; placeholder deploy step to be customized.
+
+### Release tagging flow
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+This triggers the Release workflow, builds binaries, and attaches them to the GitHub release.
+
+### Acting CI locally
+Example dry-run of CI with act (requires Docker):
+```sh
+act pull_request --eventpath .github/testdata/pull_request.json --dryrun
+```
+
+### Repository
+Private GitHub repo: https://github.com/adrianmross/oci-context

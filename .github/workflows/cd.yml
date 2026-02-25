@@ -1,0 +1,22 @@
+name: CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Environment to deploy"
+        required: true
+        default: "staging"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Placeholder deploy
+        run: echo "Implement deployment for ${{ github.event.inputs.env }}" && exit 0
