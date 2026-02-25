@@ -16,9 +16,43 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate tag
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG}"
+
+          if [ -z "$tag" ]; then
+            echo "Release tag could not be determined." >&2
+            exit 1
+          fi
+
+          if ! echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+            echo "Invalid tag format: $tag" >&2
+            echo "Expected semantic version tag like v1.2.3 or v1.2.3-rc.1" >&2
+            exit 1
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            git fetch --tags --force
+            if ! git rev-parse "$tag" >/dev/null 2>&1; then
+              echo "Tag '$tag' does not exist in repository." >&2
+              exit 1
+            fi
+          fi
+
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+
+      - name: Checkout tag (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        run: git checkout "${RELEASE_TAG}"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -40,16 +74,41 @@ jobs:
 
       - name: Build binaries
         run: |
-          go build -o dist/oci-context ./cmd/oci-context
-          go build -o dist/oci-contextd ./cmd/oci-contextd
+          set -euo pipefail
+          mkdir -p dist
+
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+          )
+
+          for target in "${targets[@]}"; do
+            GOOS="${target%% *}"
+            GOARCH="${target##* }"
+
+            ext=""
+            if [ "$GOOS" = "windows" ]; then
+              ext=".exe"
+            fi
+
+            go build -trimpath -ldflags "-s -w" -o "dist/oci-context-${GOOS}-${GOARCH}${ext}" ./cmd/oci-context
+            go build -trimpath -ldflags "-s -w" -o "dist/oci-contextd-${GOOS}-${GOARCH}${ext}" ./cmd/oci-contextd
+          done
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          (cd dist && shasum -a 256 ./* > checksums.txt)
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
-            dist/oci-context
-            dist/oci-contextd
+            dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
