@@ -1224,10 +1224,12 @@ func (m tuiModel) fetchChildren(ctx context.Context, parent string) ([]compItem,
 func (m tuiModel) saveAndQuitCurrentMode() (tea.Model, tea.Cmd) {
 	if m.mode == "contexts" {
 		if item, ok := m.list.SelectedItem().(contextItem); ok {
+			prevCtxItem := m.ctxItem
 			m.ctxItem = item
 			parent := ""
-			// If a compartment is staged for the currently selected context, preserve it.
-			if m.pendingSelectionID != "" && m.parentID != "" && m.ctxItem.Name == item.Name {
+			// If a compartment is staged for the same context that was selected before
+			// this save operation, preserve that staged compartment selection.
+			if m.pendingSelectionID != "" && m.parentID != "" && prevCtxItem.Name == item.Name {
 				parent = m.parentID
 			}
 			if parent == "" {
