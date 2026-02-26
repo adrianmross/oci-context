@@ -17,7 +17,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || (github.event_name != 'workflow_dispatch' && github.ref_type == 'tag' && github.ref_name) || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             git fetch --tags --force
-            if ! git rev-parse "$tag" >/dev/null 2>&1; then
+            if ! git show-ref --tags --verify --quiet "refs/tags/$tag"; then
               echo "Tag '$tag' does not exist in repository." >&2
               exit 1
             fi
@@ -86,16 +86,16 @@ jobs:
           )
 
           for target in "${targets[@]}"; do
-            GOOS="${target%% *}"
-            GOARCH="${target##* }"
+            target_os="${target%% *}"
+            target_arch="${target##* }"
 
             ext=""
-            if [ "$GOOS" = "windows" ]; then
+            if [ "$target_os" = "windows" ]; then
               ext=".exe"
             fi
 
-            go build -trimpath -ldflags "-s -w" -o "dist/oci-context-${GOOS}-${GOARCH}${ext}" ./cmd/oci-context
-            go build -trimpath -ldflags "-s -w" -o "dist/oci-contextd-${GOOS}-${GOARCH}${ext}" ./cmd/oci-contextd
+            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "-s -w" -o "dist/oci-context-${target_os}-${target_arch}${ext}" ./cmd/oci-context
+            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "-s -w" -o "dist/oci-contextd-${target_os}-${target_arch}${ext}" ./cmd/oci-contextd
           done
 
       - name: Generate checksums

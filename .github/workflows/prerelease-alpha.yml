@@ -6,16 +6,18 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   alpha-preview:
     runs-on: ubuntu-latest
     env:
-      ALPHA_TAG: alpha-pr-${{ github.event.pull_request.number || 'manual' }}-${{ github.sha }}
+      ALPHA_TAG: alpha-pr-${{ github.event.pull_request.number || 'manual' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -56,16 +58,16 @@ jobs:
           )
 
           for target in "${targets[@]}"; do
-            GOOS="${target%% *}"
-            GOARCH="${target##* }"
+            target_os="${target%% *}"
+            target_arch="${target##* }"
 
             ext=""
-            if [ "$GOOS" = "windows" ]; then
+            if [ "$target_os" = "windows" ]; then
               ext=".exe"
             fi
 
-            go build -trimpath -ldflags "-s -w" -o "dist/oci-context-${label}-${GOOS}-${GOARCH}${ext}" ./cmd/oci-context
-            go build -trimpath -ldflags "-s -w" -o "dist/oci-contextd-${label}-${GOOS}-${GOARCH}${ext}" ./cmd/oci-contextd
+            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "-s -w" -o "dist/oci-context-${label}-${target_os}-${target_arch}${ext}" ./cmd/oci-context
+            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "-s -w" -o "dist/oci-contextd-${label}-${target_os}-${target_arch}${ext}" ./cmd/oci-contextd
           done
 
           (cd dist && shasum -a 256 ./* > "checksums-${label}.txt")
@@ -81,6 +83,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.ALPHA_TAG }}
+          target_commitish: ${{ github.sha }}
           name: Alpha Preview PR #${{ github.event.pull_request.number }}
           body: |
             Automated alpha preview for PR #${{ github.event.pull_request.number }}.
