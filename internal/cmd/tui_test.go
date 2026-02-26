@@ -142,6 +142,149 @@ func TestTUISpaceStagesCompartment(t *testing.T) {
 	}
 }
 
+func TestTUISpaceStagesContext(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "contexts"
+	m.list.Select(0)
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	res := model.(tuiModel)
+
+	if res.pendingContextName != "dev" {
+		t.Fatalf("expected pendingContextName set, got %s", res.pendingContextName)
+	}
+}
+
+func TestTUIEscDoesNotSaveAfterStaging(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "regions"
+	m.regions.SetItems(toRegionList([]string{"us-phoenix-1", "us-ashburn-1"}))
+	m.regions.Select(1)
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	res := model.(tuiModel)
+	if res.pendingRegion != "us-ashburn-1" {
+		t.Fatalf("expected staged region before esc")
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	res = model.(tuiModel)
+	if res.finalized {
+		t.Fatalf("expected esc to quit without save after staging")
+	}
+}
+
+func TestTUIQAndCtrlSSaveEquivalentInRegions(t *testing.T) {
+	base := newTestContextItem()
+	newModel := func() tuiModel {
+		cfg := config.Config{
+			Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+			Contexts: []config.Context{base.Context},
+		}
+		m := newTuiModel(cfg, "", []list.Item{base}, nil, "")
+		m.mode = "regions"
+		m.ctxItem = base
+		m.parentID = base.TenancyOCID
+		m.regions.SetItems(toRegionList([]string{"us-phoenix-1", "us-ashburn-1"}))
+		m.regions.Select(1)
+		return m
+	}
+
+	qModel, _ := newModel().Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	qRes := qModel.(tuiModel)
+	if !qRes.finalized || qRes.ctxItem.Region != "us-ashburn-1" {
+		t.Fatalf("expected q to save selected region")
+	}
+
+	sModel, _ := newModel().Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	sRes := sModel.(tuiModel)
+	if !sRes.finalized || sRes.ctxItem.Region != "us-ashburn-1" {
+		t.Fatalf("expected ctrl+s to save selected region")
+	}
+}
+
+func TestTUICompartmentStagePersistsAcrossMenuSwitch(t *testing.T) {
+	ctxA := contextItem{config.Context{Name: "DEFAULT", Profile: "DEFAULT", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"}}
+	ctxB := contextItem{config.Context{Name: "SECOND", Profile: "SECOND", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.tenancy.oc1..ten", Region: "us-ashburn-1"}}
+	cfg := config.Config{Options: config.Options{OCIConfigPath: "/tmp/oci"}, Contexts: []config.Context{ctxA.Context, ctxB.Context}}
+	m := newTuiModel(cfg, "", []list.Item{ctxA, ctxB}, map[string]ocicfg.Profile{
+		"DEFAULT": {Tenancy: ctxA.TenancyOCID, Region: ctxA.Region},
+		"SECOND":  {Tenancy: ctxB.TenancyOCID, Region: ctxB.Region},
+	}, "")
+
+	m.mode = "compartments"
+	m.ctxItem = ctxA
+	staged := "ocid1.compartment.oc1..child"
+	comp := compItem{oc: oci.Compartment{ID: staged, Name: "child", Parent: ctxA.TenancyOCID, Status: "ACTIVE"}}
+	m.comps.SetItems([]list.Item{comp})
+	m.comps.Select(0)
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	res := model.(tuiModel)
+	if res.pendingSelectionID != staged {
+		t.Fatalf("expected staged compartment")
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	res = model.(tuiModel)
+	if res.mode != "tenancies" {
+		t.Fatalf("expected tenancies mode")
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	res = model.(tuiModel)
+	if res.mode != "contexts" {
+		t.Fatalf("expected contexts mode")
+	}
+
+	if res.pendingSelectionID != staged {
+		t.Fatalf("expected staged compartment to persist across menus, got %s", res.pendingSelectionID)
+	}
+}
+
+func TestTUIQFromContextsUsesStagedCompartmentSelection(t *testing.T) {
+	ctx := contextItem{config.Context{Name: "DEFAULT", Profile: "DEFAULT", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"}}
+	cfg := config.Config{Options: config.Options{OCIConfigPath: "/tmp/oci"}, Contexts: []config.Context{ctx.Context}}
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	m := newTuiModel(cfg, cfgPath, []list.Item{ctx}, map[string]ocicfg.Profile{
+		"DEFAULT": {Tenancy: ctx.TenancyOCID, Region: ctx.Region},
+	}, "")
+
+	// Stage a non-root compartment.
+	m.mode = "compartments"
+	m.ctxItem = ctx
+	staged := "ocid1.compartment.oc1..wiz"
+	m.parentID = staged
+	m.pendingSelectionID = staged
+
+	// Return to profiles and quit+save.
+	m.mode = "contexts"
+	m.list.Select(0)
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	res := model.(tuiModel)
+
+	if !res.finalized {
+		t.Fatalf("expected q to finalize")
+	}
+	if res.parentID != staged {
+		t.Fatalf("expected staged compartment to be saved, got %s", res.parentID)
+	}
+	if got := res.ctxItem.CompartmentOCID; got != staged {
+		t.Fatalf("expected ctxItem compartment %s, got %s", staged, got)
+	}
+}
+
 func TestTUISpaceStagesRegion(t *testing.T) {
 	ci := newTestContextItem()
 	cfg := config.Config{
