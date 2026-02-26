@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adrianmross/oci-context/pkg/config"
@@ -157,6 +158,36 @@ func TestTUISpaceStagesContext(t *testing.T) {
 
 	if res.pendingContextName != "dev" {
 		t.Fatalf("expected pendingContextName set, got %s", res.pendingContextName)
+	}
+
+	// Move cursor and ensure staged state persists independently of navigation.
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyDown})
+	res = model.(tuiModel)
+	if res.pendingContextName != "dev" {
+		t.Fatalf("expected pendingContextName to persist after navigation, got %s", res.pendingContextName)
+	}
+}
+
+func TestTUIViewShowsCompactMetaLine(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "contexts"
+	m.ctxItem = ci
+	m.pendingContextName = ci.Name
+
+	view := m.View()
+	if !strings.Contains(view, "mode:contexts") {
+		t.Fatalf("expected compact meta line to include mode, got: %s", view)
+	}
+	if !strings.Contains(view, "staged:ctx:dev") {
+		t.Fatalf("expected compact meta line to include staged context, got: %s", view)
+	}
+	if !strings.Contains(view, "[*] dev [staged]") {
+		t.Fatalf("expected staged row marker in list output, got: %s", view)
 	}
 }
 

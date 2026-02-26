@@ -22,6 +22,11 @@ import (
 )
 
 var (
+	stagedColor = lipgloss.Color("205")
+	infoColor   = lipgloss.Color("244")
+)
+
+var (
 	tenancyNames         = make(map[string]string)
 	tenancyNamesMu       sync.RWMutex
 	fetchIdentityDetails = oci.FetchIdentityDetails
@@ -191,17 +196,57 @@ type compDelegate struct {
 	pendingID *string
 }
 
+type markedItem struct {
+	base  list.Item
+	title string
+}
+
+func (m markedItem) Title() string       { return m.title }
+func (m markedItem) Description() string { return "" }
+func (m markedItem) FilterValue() string { return m.base.FilterValue() }
+
+func withStageMarker(item list.Item) list.Item {
+	return markedItem{base: item, title: "[*] " + itemTitle(item) + " [staged]"}
+}
+
+func itemTitle(item list.Item) string {
+	switch it := item.(type) {
+	case contextItem:
+		return it.Title()
+	case tenancyItem:
+		return it.Title()
+	case compItem:
+		return it.Title()
+	case regionItem:
+		return it.Title()
+	default:
+		return item.FilterValue()
+	}
+}
+
 func newCompDelegate(pendingID *string) *compDelegate {
-	return &compDelegate{DefaultDelegate: list.NewDefaultDelegate(), pendingID: pendingID}
+	d := list.NewDefaultDelegate()
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	d.ShowDescription = false
+	return &compDelegate{DefaultDelegate: d, pendingID: pendingID}
 }
 
 func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	if ci, ok := listItem.(compItem); ok && d.pendingID != nil && *d.pendingID != "" && ci.oc.ID == *d.pendingID {
+		origNormalTitle := d.Styles.NormalTitle
+		origNormalDesc := d.Styles.NormalDesc
 		origTitle := d.Styles.SelectedTitle
 		origDesc := d.Styles.SelectedDesc
-		d.Styles.SelectedTitle = origTitle.Foreground(lipgloss.Color("226"))
-		d.Styles.SelectedDesc = origDesc.Foreground(lipgloss.Color("226"))
-		d.DefaultDelegate.Render(w, m, index, listItem)
+		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
+		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalTitle = pendingTitle
+		d.Styles.NormalDesc = pendingDesc
+		d.Styles.SelectedTitle = pendingTitle
+		d.Styles.SelectedDesc = pendingDesc
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
+		d.Styles.NormalTitle = origNormalTitle
+		d.Styles.NormalDesc = origNormalDesc
 		d.Styles.SelectedTitle = origTitle
 		d.Styles.SelectedDesc = origDesc
 		return
@@ -222,18 +267,30 @@ type contextDelegate struct {
 }
 
 func newContextDelegate(pendingName *string) *contextDelegate {
-	return &contextDelegate{DefaultDelegate: list.NewDefaultDelegate(), pendingName: pendingName}
+	d := list.NewDefaultDelegate()
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	d.ShowDescription = false
+	return &contextDelegate{DefaultDelegate: d, pendingName: pendingName}
 }
 
 func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	if ci, ok := listItem.(contextItem); ok && d.pendingName != nil && *d.pendingName != "" && ci.Name == *d.pendingName {
 		origTitle := d.Styles.NormalTitle
 		origDesc := d.Styles.NormalDesc
-		d.Styles.NormalTitle = origTitle.Foreground(lipgloss.Color("201"))
-		d.Styles.NormalDesc = origDesc.Foreground(lipgloss.Color("201"))
-		d.DefaultDelegate.Render(w, m, index, listItem)
+		origSelectedTitle := d.Styles.SelectedTitle
+		origSelectedDesc := d.Styles.SelectedDesc
+		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
+		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalTitle = pendingTitle
+		d.Styles.NormalDesc = pendingDesc
+		d.Styles.SelectedTitle = pendingTitle
+		d.Styles.SelectedDesc = pendingDesc
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
 		d.Styles.NormalTitle = origTitle
 		d.Styles.NormalDesc = origDesc
+		d.Styles.SelectedTitle = origSelectedTitle
+		d.Styles.SelectedDesc = origSelectedDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -246,34 +303,58 @@ type tenancyDelegate struct {
 }
 
 func newTenancyDelegate(pendingOCID *string) *tenancyDelegate {
-	return &tenancyDelegate{DefaultDelegate: list.NewDefaultDelegate(), pendingOCID: pendingOCID}
+	d := list.NewDefaultDelegate()
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	d.ShowDescription = false
+	return &tenancyDelegate{DefaultDelegate: d, pendingOCID: pendingOCID}
 }
 
 func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	if ti, ok := listItem.(tenancyItem); ok && d.pendingOCID != nil && *d.pendingOCID != "" && ti.TenancyOCID == *d.pendingOCID {
 		origTitle := d.Styles.NormalTitle
 		origDesc := d.Styles.NormalDesc
-		d.Styles.NormalTitle = origTitle.Foreground(lipgloss.Color("201"))
-		d.Styles.NormalDesc = origDesc.Foreground(lipgloss.Color("201"))
-		d.DefaultDelegate.Render(w, m, index, listItem)
+		origSelectedTitle := d.Styles.SelectedTitle
+		origSelectedDesc := d.Styles.SelectedDesc
+		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
+		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalTitle = pendingTitle
+		d.Styles.NormalDesc = pendingDesc
+		d.Styles.SelectedTitle = pendingTitle
+		d.Styles.SelectedDesc = pendingDesc
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
 		d.Styles.NormalTitle = origTitle
 		d.Styles.NormalDesc = origDesc
+		d.Styles.SelectedTitle = origSelectedTitle
+		d.Styles.SelectedDesc = origSelectedDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
 }
 
 func newRegionDelegate(pendingName *string) *regionDelegate {
-	return &regionDelegate{DefaultDelegate: list.NewDefaultDelegate(), pendingName: pendingName}
+	d := list.NewDefaultDelegate()
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	d.ShowDescription = false
+	return &regionDelegate{DefaultDelegate: d, pendingName: pendingName}
 }
 
 func (d *regionDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	if ri, ok := listItem.(regionItem); ok && d.pendingName != nil && *d.pendingName != "" && ri.name == *d.pendingName {
+		origNormalTitle := d.Styles.NormalTitle
+		origNormalDesc := d.Styles.NormalDesc
 		origTitle := d.Styles.SelectedTitle
 		origDesc := d.Styles.SelectedDesc
-		d.Styles.SelectedTitle = origTitle.Foreground(lipgloss.Color("226"))
-		d.Styles.SelectedDesc = origDesc.Foreground(lipgloss.Color("226"))
-		d.DefaultDelegate.Render(w, m, index, listItem)
+		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
+		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalTitle = pendingTitle
+		d.Styles.NormalDesc = pendingDesc
+		d.Styles.SelectedTitle = pendingTitle
+		d.Styles.SelectedDesc = pendingDesc
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
+		d.Styles.NormalTitle = origNormalTitle
+		d.Styles.NormalDesc = origNormalDesc
 		d.Styles.SelectedTitle = origTitle
 		d.Styles.SelectedDesc = origDesc
 		return
@@ -548,9 +629,11 @@ type tuiModel struct {
 	regionSet          bool
 	regionCache        map[string][]string // context name -> regions
 	pendingSelectionID string              // compartment pending ID
+	pendingSelectionNm string              // compartment pending name
 	pendingRegion      string              // region pending name
 	pendingContextName string              // context pending name
 	pendingTenancyOCID string              // tenancy pending OCID
+	ultraCompact       bool                // minimal chrome mode
 	initCmd            tea.Cmd             // optional startup command for shortcut modes
 }
 
@@ -574,9 +657,13 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	l := list.New(items, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	l.Title = "Select OCI context"
 	l.SetFilteringEnabled(true)
+	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
 	tn := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	tn.Title = "Select tenancy"
 	tn.SetFilteringEnabled(true)
+	tn.SetShowHelp(false)
+	tn.SetShowStatusBar(false)
 	if len(profiles) > 0 {
 		// Try to pre-populate tenancy friendly names using identity calls so titles show names immediately.
 		primeTenancyNames(context.Background(), profiles, cfg.Options.OCIConfigPath)
@@ -594,18 +681,44 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	cl := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	cl.Title = "Select compartment (lazy load)"
 	cl.SetFilteringEnabled(true)
+	cl.SetShowHelp(false)
+	cl.SetShowStatusBar(false)
 	// delegate with pending highlight is attached after model creation
 	rl := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	rl.Title = "Select region"
 	rl.SetFilteringEnabled(true)
+	rl.SetShowHelp(false)
+	rl.SetShowStatusBar(false)
 	m := tuiModel{list: l, tenancies: tn, cfg: cfg, cfgPath: cfgPath, mode: "contexts", profiles: profiles, comps: cl, regions: rl, compCache: make(map[string][]compItem), parentMap: make(map[string]string), nameMap: make(map[string]string), regionCache: make(map[string][]string)}
-	// attach delegates that can highlight pending selection when space is pressed
+	m.refreshDelegates()
+	m.applyStartMode(startMode)
+	return m
+}
+
+func (m *tuiModel) refreshDelegates() {
 	m.list.SetDelegate(newContextDelegate(&m.pendingContextName))
 	m.tenancies.SetDelegate(newTenancyDelegate(&m.pendingTenancyOCID))
 	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID))
 	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion))
-	m.applyStartMode(startMode)
-	return m
+	m.applyDensityMode()
+}
+
+func (m *tuiModel) applyDensityMode() {
+	if m.ultraCompact {
+		m.list.Title = ""
+		m.tenancies.Title = ""
+		m.comps.Title = ""
+		m.regions.Title = ""
+		return
+	}
+	m.list.Title = "Select OCI context"
+	m.tenancies.Title = "Select tenancy"
+	if m.parentCrumb != "" {
+		m.comps.Title = fmt.Sprintf("Select compartment under %s", m.parentCrumb)
+	} else {
+		m.comps.Title = "Select compartment (lazy load)"
+	}
+	m.regions.Title = "Select region"
 }
 
 // selectInitialContext picks the current context if present, else the first context item.
@@ -698,6 +811,7 @@ func (m tuiModel) Init() tea.Cmd {
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.refreshDelegates()
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -772,6 +886,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if item, ok := m.list.SelectedItem().(contextItem); ok {
 					m.ctxItem = item
 					m.pendingSelectionID = ""
+					m.pendingSelectionNm = ""
 					m.pendingRegion = ""
 					// start at current compartment if set, else tenancy
 					parent := item.CompartmentOCID
@@ -805,6 +920,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.ctxItem = contextItemForProfile(profileName, p)
 					m.pendingSelectionID = ""
+					m.pendingSelectionNm = ""
 					m.pendingRegion = ""
 					// try to align selection in contexts list for visibility
 					for i, it := range m.list.Items() {
@@ -838,6 +954,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.nameMap[item.oc.ID] = item.oc.Name
 					m.parentMap[item.oc.ID] = item.oc.Parent
 					m.pendingSelectionID = ""
+					m.pendingSelectionNm = ""
 					m.status = "Loading compartments..."
 					m.crumb = fmt.Sprintf("Current: %s (%s)", m.parentCrumb, m.parentID)
 					return m, m.loadCompsCmd(item.oc.ID)
@@ -861,6 +978,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.ctxItem = item
 					m.pendingContextName = item.Name
 					m.pendingSelectionID = ""
+					m.pendingSelectionNm = ""
 					m.pendingRegion = ""
 					m.pendingTenancyOCID = ""
 					parent := item.CompartmentOCID
@@ -882,6 +1000,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.ctxItem = contextItemForProfile(profileName, p)
 						m.pendingContextName = profileName
 						m.pendingSelectionID = ""
+						m.pendingSelectionNm = ""
 						m.pendingRegion = ""
 						m.parentID = item.TenancyOCID
 						m.parentCrumb = parentLabel(item.TenancyOCID, m.ctxItem)
@@ -897,6 +1016,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.nameMap[item.oc.ID] = item.oc.Name
 					m.parentMap[item.oc.ID] = item.oc.Parent
 					m.pendingSelectionID = item.oc.ID
+					m.pendingSelectionNm = item.oc.Name
 					m.status = fmt.Sprintf("Selected %s (pending save; Enter/right to drill, Ctrl+S/q to save)", item.oc.Name)
 				}
 				return m, nil
@@ -933,6 +1053,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.mode == "tenancies" && m.tenancies.FilterState() != list.Filtering {
 				m.mode = "contexts"
 				m.pendingSelectionID = ""
+				m.pendingSelectionNm = ""
 				m.status = ""
 				return m, nil
 			}
@@ -1077,6 +1198,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.regions.SetFilterState(list.Filtering)
 			}
 			return m, nil
+		case "u":
+			m.ultraCompact = !m.ultraCompact
+			m.applyDensityMode()
+			if m.ultraCompact {
+				m.status = "ULTRA mode: ON"
+			} else {
+				m.status = "ULTRA mode: OFF"
+			}
+			return m, nil
 		}
 	}
 	// handle async comp results
@@ -1134,6 +1264,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) View() string {
+	m.refreshDelegates()
 	if m.err != nil {
 		return fmt.Sprintf("error: %v", m.err)
 	}
@@ -1141,25 +1272,38 @@ func (m tuiModel) View() string {
 		return fmt.Sprintf("Selected context %s with compartment %s\n", m.ctxItem.Name, m.parentID)
 	}
 	if m.mode == "contexts" {
-		instructions := "Enter/right to open compartments • r regions • t/T tenancies • q/Ctrl+S to save+exit • esc/Ctrl+C quit without saving"
-		return lipgloss.NewStyle().Padding(0, 1).Render(fmt.Sprintf("%s\n%s", instructions, m.list.View()))
+		meta := compactMeta(m)
+		if m.ultraCompact {
+			return fmt.Sprintf("%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render("[ULTRA] "+meta), m.list.View())
+		}
+		instructions := "ctx | enter drill • space stage • r regions • t tenancies • / filter • u ultra • q save • esc quit"
+		return fmt.Sprintf("%s\n%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render(instructions), lipgloss.NewStyle().Foreground(infoColor).Render(meta), m.list.View())
 	}
 	if m.mode == "tenancies" {
-		instructions := "Enter to choose tenancy/profile • backspace/delete/C to go back • q/Ctrl+S save+exit • esc/Ctrl+C quit without saving"
+		meta := compactMeta(m)
 		view := m.tenancies.View()
 		if m.status != "" {
 			view = fmt.Sprintf("%s\n%s", m.status, view)
 		}
-		return lipgloss.NewStyle().Padding(0, 1).Render(fmt.Sprintf("%s\n%s", instructions, view))
+		if m.ultraCompact {
+			return fmt.Sprintf("%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render("[ULTRA] "+meta), view)
+		}
+		instructions := "tenancy | enter use • space stage • backspace/P back • / filter • u ultra • q save • esc quit"
+		return fmt.Sprintf("%s\n%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render(instructions), lipgloss.NewStyle().Foreground(infoColor).Render(meta), view)
 	}
 	if m.mode == "regions" {
-		instructions := "Space to stage, Ctrl+S or q to save • Enter stages then returns • backspace/delete/C to go back • esc/Ctrl+C quit without saving"
+		meta := compactMeta(m)
 		view := m.regions.View()
 		if m.status != "" {
 			view = fmt.Sprintf("%s\n%s", m.status, view)
 		}
-		return lipgloss.NewStyle().Padding(0, 1).Render(fmt.Sprintf("%s\n%s", instructions, view))
+		if m.ultraCompact {
+			return fmt.Sprintf("%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render("[ULTRA] "+meta), view)
+		}
+		instructions := "region | space stage • enter apply+back • backspace/P back • / filter • u ultra • q save • esc quit"
+		return fmt.Sprintf("%s\n%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render(instructions), lipgloss.NewStyle().Foreground(infoColor).Render(meta), view)
 	}
+	meta := compactMeta(m)
 	view := m.comps.View()
 	if m.crumb != "" {
 		view = fmt.Sprintf("%s\n%s", m.crumb, view)
@@ -1167,7 +1311,54 @@ func (m tuiModel) View() string {
 	if m.status != "" {
 		view = fmt.Sprintf("%s\n%s", m.status, view)
 	}
-	return lipgloss.NewStyle().Padding(0, 1).Render(view)
+	if m.ultraCompact {
+		return fmt.Sprintf("%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render("[ULTRA] "+meta), view)
+	}
+	instructions := "comp | enter drill • space stage • backspace up • / filter • u ultra • q save • esc quit"
+	return fmt.Sprintf("%s\n%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render(instructions), lipgloss.NewStyle().Foreground(infoColor).Render(meta), view)
+}
+
+func compactMeta(m tuiModel) string {
+	staged := "-"
+	if m.pendingContextName != "" {
+		staged = "ctx:" + m.pendingContextName
+	}
+	if m.pendingTenancyOCID != "" {
+		staged = "tenancy:" + abbreviateOCID(m.pendingTenancyOCID)
+	}
+	if m.pendingSelectionID != "" {
+		staged = "comp:" + abbreviateOCID(m.pendingSelectionID)
+	}
+	if m.pendingRegion != "" {
+		staged = "region:" + m.pendingRegion
+	}
+	filter := "off"
+	switch m.mode {
+	case "contexts":
+		if m.list.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	case "tenancies":
+		if m.tenancies.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	case "compartments":
+		if m.comps.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	case "regions":
+		if m.regions.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	}
+	current := m.ctxItem.Name
+	if current == "" {
+		current = m.cfg.CurrentContext
+	}
+	if current == "" {
+		current = "-"
+	}
+	return fmt.Sprintf("mode:%s | current:%s | staged:%s | filter:%s", m.mode, current, staged, filter)
 }
 
 type compResultMsg struct {
