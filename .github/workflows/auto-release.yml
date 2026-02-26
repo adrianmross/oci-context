@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: write
-  workflows: write
 
 jobs:
   tag-and-release:
@@ -29,6 +28,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          if git diff-tree --no-commit-id --name-only -r HEAD | grep -Eq '^\.github/workflows/'; then
+            echo "HEAD modifies workflow files; skipping auto-tag for this commit to avoid GitHub App workflow-scope restriction."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           latest_tag="$(git tag --list 'v*' --sort=-version:refname | head -n1 || true)"
           if [[ -z "${latest_tag}" ]]; then
