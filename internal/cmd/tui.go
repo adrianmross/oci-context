@@ -215,6 +215,54 @@ type regionDelegate struct {
 	pendingName *string
 }
 
+// contextDelegate highlights pending context selection when present.
+type contextDelegate struct {
+	list.DefaultDelegate
+	pendingName *string
+}
+
+func newContextDelegate(pendingName *string) *contextDelegate {
+	return &contextDelegate{DefaultDelegate: list.NewDefaultDelegate(), pendingName: pendingName}
+}
+
+func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	if ci, ok := listItem.(contextItem); ok && d.pendingName != nil && *d.pendingName != "" && ci.Name == *d.pendingName {
+		origTitle := d.Styles.NormalTitle
+		origDesc := d.Styles.NormalDesc
+		d.Styles.NormalTitle = origTitle.Foreground(lipgloss.Color("201"))
+		d.Styles.NormalDesc = origDesc.Foreground(lipgloss.Color("201"))
+		d.DefaultDelegate.Render(w, m, index, listItem)
+		d.Styles.NormalTitle = origTitle
+		d.Styles.NormalDesc = origDesc
+		return
+	}
+	d.DefaultDelegate.Render(w, m, index, listItem)
+}
+
+// tenancyDelegate highlights pending tenancy selection when present.
+type tenancyDelegate struct {
+	list.DefaultDelegate
+	pendingOCID *string
+}
+
+func newTenancyDelegate(pendingOCID *string) *tenancyDelegate {
+	return &tenancyDelegate{DefaultDelegate: list.NewDefaultDelegate(), pendingOCID: pendingOCID}
+}
+
+func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	if ti, ok := listItem.(tenancyItem); ok && d.pendingOCID != nil && *d.pendingOCID != "" && ti.TenancyOCID == *d.pendingOCID {
+		origTitle := d.Styles.NormalTitle
+		origDesc := d.Styles.NormalDesc
+		d.Styles.NormalTitle = origTitle.Foreground(lipgloss.Color("201"))
+		d.Styles.NormalDesc = origDesc.Foreground(lipgloss.Color("201"))
+		d.DefaultDelegate.Render(w, m, index, listItem)
+		d.Styles.NormalTitle = origTitle
+		d.Styles.NormalDesc = origDesc
+		return
+	}
+	d.DefaultDelegate.Render(w, m, index, listItem)
+}
+
 func newRegionDelegate(pendingName *string) *regionDelegate {
 	return &regionDelegate{DefaultDelegate: list.NewDefaultDelegate(), pendingName: pendingName}
 }
@@ -501,6 +549,8 @@ type tuiModel struct {
 	regionCache        map[string][]string // context name -> regions
 	pendingSelectionID string              // compartment pending ID
 	pendingRegion      string              // region pending name
+	pendingContextName string              // context pending name
+	pendingTenancyOCID string              // tenancy pending OCID
 	initCmd            tea.Cmd             // optional startup command for shortcut modes
 }
 
@@ -550,6 +600,8 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	rl.SetFilteringEnabled(true)
 	m := tuiModel{list: l, tenancies: tn, cfg: cfg, cfgPath: cfgPath, mode: "contexts", profiles: profiles, comps: cl, regions: rl, compCache: make(map[string][]compItem), parentMap: make(map[string]string), nameMap: make(map[string]string), regionCache: make(map[string][]string)}
 	// attach delegates that can highlight pending selection when space is pressed
+	m.list.SetDelegate(newContextDelegate(&m.pendingContextName))
+	m.tenancies.SetDelegate(newTenancyDelegate(&m.pendingTenancyOCID))
 	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID))
 	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion))
 	m.applyStartMode(startMode)
@@ -807,8 +859,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.mode == "contexts" {
 				if item, ok := m.list.SelectedItem().(contextItem); ok {
 					m.ctxItem = item
+					m.pendingContextName = item.Name
 					m.pendingSelectionID = ""
 					m.pendingRegion = ""
+					m.pendingTenancyOCID = ""
 					parent := item.CompartmentOCID
 					if parent == "" {
 						parent = item.TenancyOCID
@@ -821,10 +875,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.mode == "tenancies" {
 				if item, ok := m.tenancies.SelectedItem().(tenancyItem); ok {
+					m.pendingTenancyOCID = item.TenancyOCID
 					profileName := selectProfileForTenancy(item, m.profiles, m.cfg.Options.DefaultProfile)
 					p, ok := m.profiles[profileName]
 					if ok {
 						m.ctxItem = contextItemForProfile(profileName, p)
+						m.pendingContextName = profileName
 						m.pendingSelectionID = ""
 						m.pendingRegion = ""
 						m.parentID = item.TenancyOCID
@@ -841,7 +897,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.nameMap[item.oc.ID] = item.oc.Name
 					m.parentMap[item.oc.ID] = item.oc.Parent
 					m.pendingSelectionID = item.oc.ID
-					m.status = fmt.Sprintf("Selected %s (pending save; Enter/right to drill, Ctrl+S/q/esc to save)", item.oc.Name)
+					m.status = fmt.Sprintf("Selected %s (pending save; Enter/right to drill, Ctrl+S/q to save)", item.oc.Name)
 				}
 				return m, nil
 			}
@@ -850,58 +906,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.ctxItem.Region = item.name
 					m.regionSet = true
 					m.pendingRegion = item.name
-					m.status = fmt.Sprintf("Region set to %s (pending save; Ctrl+S/q/esc to save)", item.name)
+					m.status = fmt.Sprintf("Region set to %s (pending save; Ctrl+S/q to save)", item.name)
 				}
 				return m, nil
 			}
 			return m, nil
-		case "ctrl+s", "q":
-			if m.mode == "contexts" {
-				// save current highlighted context using its existing compartment or tenancy
-				if item, ok := m.list.SelectedItem().(contextItem); ok {
-					m.ctxItem = item
-					parent := item.CompartmentOCID
-					if parent == "" {
-						parent = item.TenancyOCID
-					}
-					m.parentID = parent
-					m.parentCrumb = parentLabel(parent, item)
-					return m.finalizeSelection()
-				}
-				return m, nil
-			}
-			if m.mode == "tenancies" {
-				if item, ok := m.tenancies.SelectedItem().(tenancyItem); ok {
-					profileName := selectProfileForTenancy(item, m.profiles, m.cfg.Options.DefaultProfile)
-					p, ok := m.profiles[profileName]
-					if ok {
-						m.ctxItem = contextItemForProfile(profileName, p)
-						m.parentID = item.TenancyOCID
-						m.parentCrumb = parentLabel(item.TenancyOCID, m.ctxItem)
-						return m.finalizeSelection()
-					}
-				}
-				return m, nil
-			}
-			if m.mode == "compartments" {
-				return m.finalizeSelection()
-			}
-			if m.mode == "regions" {
-				if item, ok := m.regions.SelectedItem().(regionItem); ok {
-					m.ctxItem.Region = item.name
-					m.regionSet = true
-					// ensure parent selection is set when saving from regions
-					if m.parentID == "" {
-						parent := m.ctxItem.CompartmentOCID
-						if parent == "" {
-							parent = m.ctxItem.TenancyOCID
-						}
-						m.parentID = parent
-						m.parentCrumb = parentLabel(parent, m.ctxItem)
-					}
-					return m.finalizeSelection()
-				}
-			}
+		case "ctrl+s":
+			return m.saveAndQuitCurrentMode()
+		case "q":
+			return m.saveAndQuitCurrentMode()
 		case "esc", "ctrl+c":
 			// Exit without saving on explicit quit keys.
 			return m, tea.Quit
@@ -1128,11 +1141,11 @@ func (m tuiModel) View() string {
 		return fmt.Sprintf("Selected context %s with compartment %s\n", m.ctxItem.Name, m.parentID)
 	}
 	if m.mode == "contexts" {
-		instructions := "Enter/right to open compartments • r regions • t/T tenancies • q/esc/Ctrl+C to quit without saving"
+		instructions := "Enter/right to open compartments • r regions • t/T tenancies • q/Ctrl+S to save+exit • esc/Ctrl+C quit without saving"
 		return lipgloss.NewStyle().Padding(0, 1).Render(fmt.Sprintf("%s\n%s", instructions, m.list.View()))
 	}
 	if m.mode == "tenancies" {
-		instructions := "Enter to choose tenancy/profile • backspace/delete/C to go back • q/esc/Ctrl+C to quit without saving"
+		instructions := "Enter to choose tenancy/profile • backspace/delete/C to go back • q/Ctrl+S save+exit • esc/Ctrl+C quit without saving"
 		view := m.tenancies.View()
 		if m.status != "" {
 			view = fmt.Sprintf("%s\n%s", m.status, view)
@@ -1140,7 +1153,7 @@ func (m tuiModel) View() string {
 		return lipgloss.NewStyle().Padding(0, 1).Render(fmt.Sprintf("%s\n%s", instructions, view))
 	}
 	if m.mode == "regions" {
-		instructions := "Space to stage, Ctrl+S to save • Enter stages then returns • backspace/delete/C to go back • q/esc/Ctrl+C to quit without saving"
+		instructions := "Space to stage, Ctrl+S or q to save • Enter stages then returns • backspace/delete/C to go back • esc/Ctrl+C quit without saving"
 		view := m.regions.View()
 		if m.status != "" {
 			view = fmt.Sprintf("%s\n%s", m.status, view)
@@ -1205,6 +1218,64 @@ func (m tuiModel) fetchChildren(ctx context.Context, parent string) ([]compItem,
 	}
 	// if no children, return empty; caller will allow finalization
 	return items, nil
+}
+
+// saveAndQuitCurrentMode consolidates save+exit behavior used by q and Ctrl+S.
+func (m tuiModel) saveAndQuitCurrentMode() (tea.Model, tea.Cmd) {
+	if m.mode == "contexts" {
+		if item, ok := m.list.SelectedItem().(contextItem); ok {
+			prevCtxItem := m.ctxItem
+			m.ctxItem = item
+			parent := ""
+			// If a compartment is staged for the same context that was selected before
+			// this save operation, preserve that staged compartment selection.
+			if m.pendingSelectionID != "" && m.parentID != "" && prevCtxItem.Name == item.Name {
+				parent = m.parentID
+			}
+			if parent == "" {
+				parent = item.CompartmentOCID
+				if parent == "" {
+					parent = item.TenancyOCID
+				}
+			}
+			m.parentID = parent
+			m.parentCrumb = parentLabel(parent, item)
+			return m.finalizeSelection()
+		}
+		return m, nil
+	}
+	if m.mode == "tenancies" {
+		if item, ok := m.tenancies.SelectedItem().(tenancyItem); ok {
+			profileName := selectProfileForTenancy(item, m.profiles, m.cfg.Options.DefaultProfile)
+			p, ok := m.profiles[profileName]
+			if ok {
+				m.ctxItem = contextItemForProfile(profileName, p)
+				m.parentID = item.TenancyOCID
+				m.parentCrumb = parentLabel(item.TenancyOCID, m.ctxItem)
+				return m.finalizeSelection()
+			}
+		}
+		return m, nil
+	}
+	if m.mode == "compartments" {
+		return m.finalizeSelection()
+	}
+	if m.mode == "regions" {
+		if item, ok := m.regions.SelectedItem().(regionItem); ok {
+			m.ctxItem.Region = item.name
+			m.regionSet = true
+			if m.parentID == "" {
+				parent := m.ctxItem.CompartmentOCID
+				if parent == "" {
+					parent = m.ctxItem.TenancyOCID
+				}
+				m.parentID = parent
+				m.parentCrumb = parentLabel(parent, m.ctxItem)
+			}
+			return m.finalizeSelection()
+		}
+	}
+	return m, nil
 }
 
 // parentLabel returns a friendly label for the current parent (root/tenancy fallback).

@@ -30,12 +30,12 @@ VERSION=v0.1.0 curl -sSL https://raw.githubusercontent.com/adrianmross/oci-conte
 - `/` to start filtering the current list; hotkeys are suppressed while typing.
 - `Enter` applies the filtered list and in-region modes stages the selection.
 - `Space` stages/highlights the current row (pending save); staged items show in magenta.
-- `Ctrl+S` saves the staged/current selection from any mode.
+- `Ctrl+S` or `q` saves the staged/current selection from any mode.
 - **Hotkey casing rule:** in the main menu (`contexts`) use lowercase hotkeys; in submenus (`tenancies`, `compartments`, `regions`) use uppercase hotkeys.
 - Main menu (`contexts`): `r` opens regions, `c` opens compartments, `t` opens tenancies.
 - Submenus: `R` opens regions, `C` opens compartments, `T` opens tenancies, `P` returns to profiles/contexts.
 - Navigation: `backspace` goes up/back.
-- Quit: `q`, `Esc`, or `Ctrl+C` exit immediately **without saving**.
+- Quit without saving: `Esc` or `Ctrl+C`.
 
 ## Config
 Config resolution
