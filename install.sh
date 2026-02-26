@@ -27,13 +27,14 @@ case "${tool}" in
 esac
 
 if [[ "${version}" == "latest" ]]; then
-  version=$(curl -fsSL --retry 3 --retry-all-errors "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.tag_name')
+  version=$(curl -sSL --retry 3 --retry-all-errors "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.tag_name // empty')
 elif [[ "${version}" == "pre" || "${version}" == "prerelease" ]]; then
-  version=$(curl -fsSL --retry 3 --retry-all-errors "https://api.github.com/repos/${repo}/releases" | jq -r '[.[] | select(.prerelease)] | sort_by(.published_at) | reverse | .[0].tag_name')
+  version=$(curl -sSL --retry 3 --retry-all-errors "https://api.github.com/repos/${repo}/releases" | jq -r '[.[] | select(.prerelease)] | sort_by(.published_at) | reverse | .[0].tag_name // empty')
 fi
 
 if [[ -z "${version}" || "${version}" == "null" ]]; then
-  echo "Unable to determine release version" >&2
+  echo "Unable to determine release version." >&2
+  echo "No stable release may exist yet. Publish a GitHub release first, or set VERSION=<tag>, or use VERSION=prerelease." >&2
   exit 1
 fi
 
