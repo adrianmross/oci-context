@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -105,6 +106,15 @@ jobs:
 
       - name: Release handoff
         if: steps.semver.outputs.should_release == 'true'
-        run: |
-          echo "Created ${GITHUB_REPOSITORY}@${{ steps.semver.outputs.new_tag }}"
-          echo "Tag push will trigger .github/workflows/release.yml"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release.yml',
+              ref: 'main',
+              inputs: {
+                tag: '${{ steps.semver.outputs.new_tag }}'
+              }
+            })
