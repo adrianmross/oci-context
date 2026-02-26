@@ -224,11 +224,22 @@ func itemTitle(item list.Item) string {
 	}
 }
 
-func newCompDelegate(pendingID *string) *compDelegate {
-	d := list.NewDefaultDelegate()
-	d.SetHeight(1)
+func configureDefaultDelegateDensity(d *list.DefaultDelegate, ultraCompact bool) {
+	if ultraCompact {
+		d.SetHeight(1)
+		d.SetSpacing(0)
+		d.ShowDescription = false
+		return
+	}
+	// In normal density, keep row descriptions visible (title + description).
+	d.SetHeight(2)
 	d.SetSpacing(0)
-	d.ShowDescription = false
+	d.ShowDescription = true
+}
+
+func newCompDelegate(pendingID *string, ultraCompact bool) *compDelegate {
+	d := list.NewDefaultDelegate()
+	configureDefaultDelegateDensity(&d, ultraCompact)
 	return &compDelegate{DefaultDelegate: d, pendingID: pendingID}
 }
 
@@ -266,11 +277,9 @@ type contextDelegate struct {
 	pendingName *string
 }
 
-func newContextDelegate(pendingName *string) *contextDelegate {
+func newContextDelegate(pendingName *string, ultraCompact bool) *contextDelegate {
 	d := list.NewDefaultDelegate()
-	d.SetHeight(1)
-	d.SetSpacing(0)
-	d.ShowDescription = false
+	configureDefaultDelegateDensity(&d, ultraCompact)
 	return &contextDelegate{DefaultDelegate: d, pendingName: pendingName}
 }
 
@@ -302,11 +311,9 @@ type tenancyDelegate struct {
 	pendingOCID *string
 }
 
-func newTenancyDelegate(pendingOCID *string) *tenancyDelegate {
+func newTenancyDelegate(pendingOCID *string, ultraCompact bool) *tenancyDelegate {
 	d := list.NewDefaultDelegate()
-	d.SetHeight(1)
-	d.SetSpacing(0)
-	d.ShowDescription = false
+	configureDefaultDelegateDensity(&d, ultraCompact)
 	return &tenancyDelegate{DefaultDelegate: d, pendingOCID: pendingOCID}
 }
 
@@ -332,11 +339,9 @@ func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 	d.DefaultDelegate.Render(w, m, index, listItem)
 }
 
-func newRegionDelegate(pendingName *string) *regionDelegate {
+func newRegionDelegate(pendingName *string, ultraCompact bool) *regionDelegate {
 	d := list.NewDefaultDelegate()
-	d.SetHeight(1)
-	d.SetSpacing(0)
-	d.ShowDescription = false
+	configureDefaultDelegateDensity(&d, ultraCompact)
 	return &regionDelegate{DefaultDelegate: d, pendingName: pendingName}
 }
 
@@ -696,10 +701,10 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 }
 
 func (m *tuiModel) refreshDelegates() {
-	m.list.SetDelegate(newContextDelegate(&m.pendingContextName))
-	m.tenancies.SetDelegate(newTenancyDelegate(&m.pendingTenancyOCID))
-	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID))
-	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion))
+	m.list.SetDelegate(newContextDelegate(&m.pendingContextName, m.ultraCompact))
+	m.tenancies.SetDelegate(newTenancyDelegate(&m.pendingTenancyOCID, m.ultraCompact))
+	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID, m.ultraCompact))
+	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion, m.ultraCompact))
 	m.applyDensityMode()
 }
 
