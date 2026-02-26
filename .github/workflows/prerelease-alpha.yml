@@ -78,8 +78,22 @@ jobs:
           name: alpha-preview-${{ github.event.pull_request.number || 'manual' }}-${{ github.sha }}
           path: dist/
 
+  publish-prerelease:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: alpha-preview
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      ALPHA_TAG: alpha-pr-${{ github.event.pull_request.number }}
+    steps:
+      - name: Download alpha artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpha-preview-${{ github.event.pull_request.number }}-${{ github.sha }}
+          path: dist/
+
       - name: Create/Update draft prerelease (internal PRs only)
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.ALPHA_TAG }}
