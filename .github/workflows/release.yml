@@ -72,48 +72,11 @@ jobs:
       - name: Go test
         run: go test ./...
 
-      - name: Build binaries
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-
-          targets=(
-            "linux amd64"
-            "linux arm64"
-            "darwin amd64"
-            "darwin arm64"
-            "windows amd64"
-          )
-
-          for target in "${targets[@]}"; do
-            target_os="${target%% *}"
-            target_arch="${target##* }"
-
-            ext=""
-            if [ "$target_os" = "windows" ]; then
-              ext=".exe"
-            fi
-
-            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "-s -w" -o "dist/oci-context-${target_os}-${target_arch}${ext}" ./cmd/oci-context
-            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "-s -w" -o "dist/oci-contextd-${target_os}-${target_arch}${ext}" ./cmd/oci-contextd
-          done
-
-      - name: Generate checksums
-        run: |
-          set -euo pipefail
-          (cd dist && shasum -a 256 ./* > checksums.txt)
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          files: |
-            dist/*
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: dist/

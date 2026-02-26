@@ -6,6 +6,26 @@ A daemon + CLI/TUI to manage OCI context (profile, tenancy, compartment, region)
 - **Daemon (oci-contextd)**: maintains current context, serves a Unix socket with JSON RPC-like API for get/set/list/status/watch.
 - **CLI/TUI (oci-context)**: manage contexts, switch current context, export env/JSON, control daemon, and pick via TUI selector.
 
+## Install
+
+One-line install (default: `oci-context` latest stable):
+
+```sh
+curl -sSL https://raw.githubusercontent.com/adrianmross/oci-context/main/install.sh | bash
+```
+
+Install daemon binary instead:
+
+```sh
+TOOL=oci-contextd curl -sSL https://raw.githubusercontent.com/adrianmross/oci-context/main/install.sh | bash
+```
+
+Install a specific version:
+
+```sh
+VERSION=v0.1.0 curl -sSL https://raw.githubusercontent.com/adrianmross/oci-context/main/install.sh | bash
+```
+
 ### TUI controls (quick reference)
 - `/` to start filtering the current list; hotkeys are suppressed while typing.
 - `Enter` applies the filtered list and in-region modes stages the selection.
@@ -159,7 +179,7 @@ Targets:
 
 ### GitHub Actions workflows
 - **CI** (`.github/workflows/ci.yml`): on push/PR to main/develop/release/**; runs gofmt (checks diff), go vet, go test, actionlint.
-- **Release** (`.github/workflows/release.yml`): on tag `v*` or manual dispatch; runs tests, builds binaries, creates GitHub Release with artifacts.
+- **Release** (`.github/workflows/release.yml`): on tag `v*` or manual dispatch; validates tag, runs tests, and uses GoReleaser to publish cross-platform tarballs plus `checksums.txt`.
 - **CD** (`.github/workflows/cd.yml`): manual `workflow_dispatch` with `env` input; placeholder deploy step to be customized.
 
 ### Release tagging flow
