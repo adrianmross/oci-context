@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  workflows: write
 
 jobs:
   tag-and-release:
@@ -37,7 +38,7 @@ jobs:
             commit_range="${latest_tag}..HEAD"
           fi
 
-          commits="$(git log --format=%s ${commit_range})"
+          commits="$(git log --format=%s "${commit_range}")"
 
           if [[ -z "${commits}" ]]; then
             echo "No commits found for release range ${commit_range}; skipping."
@@ -77,9 +78,11 @@ jobs:
             exit 0
           fi
 
-          echo "latest_tag=${latest_tag}" >> "$GITHUB_OUTPUT"
-          echo "new_tag=${new_tag}" >> "$GITHUB_OUTPUT"
-          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "latest_tag=${latest_tag}"
+            echo "new_tag=${new_tag}"
+            echo "should_release=true"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Run tests
         if: steps.semver.outputs.should_release == 'true'
