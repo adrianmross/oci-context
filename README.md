@@ -34,7 +34,7 @@ VERSION=v0.1.0 curl -sSL https://raw.githubusercontent.com/adrianmross/oci-conte
 - **Hotkey casing rule:** in the main menu (`contexts`) use lowercase hotkeys; in submenus (`tenancies`, `compartments`, `regions`) use uppercase hotkeys.
 - Main menu (`contexts`): `r` opens regions, `c` opens compartments, `t` opens tenancies.
 - Submenus: `R` opens regions, `C` opens compartments, `T` opens tenancies, `P` returns to profiles/contexts.
-- Navigation: `h/left/backspace` go up/back.
+- Navigation: `backspace` goes up/back.
 - Quit: `q`, `Esc`, or `Ctrl+C` exit immediately **without saving**.
 
 ## Config
