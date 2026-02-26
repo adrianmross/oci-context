@@ -95,16 +95,8 @@ jobs:
           git tag -a "$tag" -m "Release $tag"
           git push origin "$tag"
 
-      - name: Checkout release tag
+      - name: Release handoff
         if: steps.semver.outputs.should_release == 'true'
-        run: git checkout "${{ steps.semver.outputs.new_tag }}"
-
-      - name: Run GoReleaser
-        if: steps.semver.outputs.should_release == 'true'
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Created ${GITHUB_REPOSITORY}@${{ steps.semver.outputs.new_tag }}"
+          echo "Tag push will trigger .github/workflows/release.yml"
