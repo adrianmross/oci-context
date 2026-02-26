@@ -7,6 +7,17 @@ bin_dir="${prefix}/bin"
 tool="${TOOL:-oci-context}" # oci-context or oci-contextd
 version="${VERSION:-latest}" # latest, prerelease, or explicit tag (e.g. v0.1.0)
 
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required dependency: $1" >&2
+    exit 1
+  fi
+}
+
+for cmd in curl jq tar install grep awk uname mktemp; do
+  require_cmd "$cmd"
+done
+
 case "${tool}" in
   oci-context|oci-contextd) ;;
   *)
@@ -16,9 +27,9 @@ case "${tool}" in
 esac
 
 if [[ "${version}" == "latest" ]]; then
-  version=$(curl -sSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.tag_name')
+  version=$(curl -fsSL --retry 3 --retry-all-errors "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.tag_name')
 elif [[ "${version}" == "pre" || "${version}" == "prerelease" ]]; then
-  version=$(curl -sSL "https://api.github.com/repos/${repo}/releases" | jq -r '[.[] | select(.prerelease)] | sort_by(.published_at) | reverse | .[0].tag_name')
+  version=$(curl -fsSL --retry 3 --retry-all-errors "https://api.github.com/repos/${repo}/releases" | jq -r '[.[] | select(.prerelease)] | sort_by(.published_at) | reverse | .[0].tag_name')
 fi
 
 if [[ -z "${version}" || "${version}" == "null" ]]; then
@@ -37,13 +48,14 @@ case "${uname_m}" in
     ;;
 esac
 
-asset="${tool}_${version}_${uname_s}_${arch}.tar.gz"
+version_no_v="${version#v}"
+asset="${tool}_${version_no_v}_${uname_s}_${arch}.tar.gz"
 checksums_asset="checksums.txt"
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "${tmp_dir}"' EXIT
 
-curl -sSL -o "${tmp_dir}/${asset}" "https://github.com/${repo}/releases/download/${version}/${asset}"
-curl -sSL -o "${tmp_dir}/${checksums_asset}" "https://github.com/${repo}/releases/download/${version}/${checksums_asset}"
+curl -fsSL --retry 3 --retry-all-errors -o "${tmp_dir}/${asset}" "https://github.com/${repo}/releases/download/${version}/${asset}"
+curl -fsSL --retry 3 --retry-all-errors -o "${tmp_dir}/${checksums_asset}" "https://github.com/${repo}/releases/download/${version}/${checksums_asset}"
 
 expected_checksum=$(grep "  ${asset}$" "${tmp_dir}/${checksums_asset}" | awk '{print $1}')
 if [[ -z "${expected_checksum}" ]]; then
@@ -51,7 +63,15 @@ if [[ -z "${expected_checksum}" ]]; then
   exit 1
 fi
 
-actual_checksum=$(shasum -a 256 "${tmp_dir}/${asset}" | awk '{print $1}')
+if command -v shasum >/dev/null 2>&1; then
+  actual_checksum=$(shasum -a 256 "${tmp_dir}/${asset}" | awk '{print $1}')
+elif command -v sha256sum >/dev/null 2>&1; then
+  actual_checksum=$(sha256sum "${tmp_dir}/${asset}" | awk '{print $1}')
+else
+  echo "No suitable SHA-256 checksum tool found (tried 'shasum' and 'sha256sum')." >&2
+  echo "Please install one of these tools and re-run the installer." >&2
+  exit 1
+fi
 if [[ "${expected_checksum}" != "${actual_checksum}" ]]; then
   echo "Checksum mismatch for ${asset}" >&2
   echo "Expected: ${expected_checksum}" >&2

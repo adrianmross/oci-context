@@ -4,7 +4,7 @@ project_name: oci-context
 
 before:
   hooks:
-    - go mod tidy
+    - bash -c 'go mod tidy && git diff --quiet -- go.mod go.sum'
     - go test ./...
 
 builds:
