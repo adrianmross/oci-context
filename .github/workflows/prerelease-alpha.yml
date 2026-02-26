@@ -1,0 +1,111 @@
+name: PR Alpha Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  alpha-preview:
+    runs-on: ubuntu-latest
+    env:
+      ALPHA_TAG: alpha-pr-${{ github.event.pull_request.number || 'manual' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Go test
+        run: go test ./...
+
+      - name: Build alpha binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            label="alpha-pr-${{ github.event.pull_request.number }}-${short_sha}"
+          else
+            label="alpha-manual-${short_sha}"
+          fi
+
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+          )
+
+          for target in "${targets[@]}"; do
+            target_os="${target%% *}"
+            target_arch="${target##* }"
+
+            ext=""
+            if [ "$target_os" = "windows" ]; then
+              ext=".exe"
+            fi
+
+            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "-s -w" -o "dist/oci-context-${label}-${target_os}-${target_arch}${ext}" ./cmd/oci-context
+            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "-s -w" -o "dist/oci-contextd-${label}-${target_os}-${target_arch}${ext}" ./cmd/oci-contextd
+          done
+
+          (cd dist && shasum -a 256 ./* > "checksums-${label}.txt")
+
+      - name: Upload alpha artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-preview-${{ github.event.pull_request.number || 'manual' }}-${{ github.sha }}
+          path: dist/
+
+  publish-prerelease:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: alpha-preview
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      ALPHA_TAG: alpha-pr-${{ github.event.pull_request.number }}
+    steps:
+      - name: Download alpha artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpha-preview-${{ github.event.pull_request.number }}-${{ github.sha }}
+          path: dist/
+
+      - name: Create/Update draft prerelease (internal PRs only)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.ALPHA_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Alpha Preview PR #${{ github.event.pull_request.number }}
+          body: |
+            Automated alpha preview for PR #${{ github.event.pull_request.number }}.
+            Commit: ${{ github.sha }}
+          draft: true
+          prerelease: true
+          make_latest: false
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
