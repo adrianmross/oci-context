@@ -191,6 +191,28 @@ func TestTUIViewShowsCompactMetaLine(t *testing.T) {
 	}
 }
 
+func TestTUIDensityModeShowsDescriptionsOnlyWhenNotUltra(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "contexts"
+
+	normalView := m.View()
+	if !strings.Contains(normalView, "profile=DEFAULT region=us-phoenix-1") {
+		t.Fatalf("expected normal mode to show row description, got: %s", normalView)
+	}
+
+	m.ultraCompact = true
+	m.refreshDelegates()
+	ultraView := m.View()
+	if strings.Contains(ultraView, "profile=DEFAULT region=us-phoenix-1") {
+		t.Fatalf("expected ultra mode to hide row description, got: %s", ultraView)
+	}
+}
+
 func TestTUIEscDoesNotSaveAfterStaging(t *testing.T) {
 	ci := newTestContextItem()
 	cfg := config.Config{
