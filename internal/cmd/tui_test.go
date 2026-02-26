@@ -186,12 +186,14 @@ func TestTUIEscDoesNotSaveAfterStaging(t *testing.T) {
 
 func TestTUIQAndCtrlSSaveEquivalentInRegions(t *testing.T) {
 	base := newTestContextItem()
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
 	newModel := func() tuiModel {
 		cfg := config.Config{
 			Options:  config.Options{OCIConfigPath: "/tmp/oci"},
 			Contexts: []config.Context{base.Context},
 		}
-		m := newTuiModel(cfg, "", []list.Item{base}, nil, "")
+		m := newTuiModel(cfg, cfgPath, []list.Item{base}, nil, "")
 		m.mode = "regions"
 		m.ctxItem = base
 		m.parentID = base.TenancyOCID
