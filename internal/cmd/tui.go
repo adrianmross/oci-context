@@ -22,9 +22,84 @@ import (
 )
 
 var (
-	stagedColor = lipgloss.Color("205")
-	infoColor   = lipgloss.Color("244")
+	stagedColor      = lipgloss.Color("205")
+	infoColor        = lipgloss.Color("252")
+	accentColor      = lipgloss.Color("45")
+	activeTabColor   = lipgloss.Color("33")
+	inactiveTabColor = lipgloss.Color("245")
+	panelColor       = lipgloss.Color("240")
+	mutedTextColor   = lipgloss.Color("242")
+	statusOkColor    = lipgloss.Color("42")
+	statusInfoColor  = lipgloss.Color("45")
+	statusWarnColor  = lipgloss.Color("214")
+	statusErrColor   = lipgloss.Color("196")
 )
+
+type tuiTheme struct {
+	headerTitle  lipgloss.Style
+	headerSubtle lipgloss.Style
+	tabActive    lipgloss.Style
+	tabInactive  lipgloss.Style
+	panel        lipgloss.Style
+	instructions lipgloss.Style
+	metaLabel    lipgloss.Style
+	metaValue    lipgloss.Style
+	status       lipgloss.Style
+	statusInfo   lipgloss.Style
+	statusWarn   lipgloss.Style
+	statusErr    lipgloss.Style
+	statusMuted  lipgloss.Style
+	ultraBadge   lipgloss.Style
+	metaBar      lipgloss.Style
+}
+
+func newTUITheme() tuiTheme {
+	return tuiTheme{
+		headerTitle:  lipgloss.NewStyle().Foreground(accentColor).Bold(true),
+		headerSubtle: lipgloss.NewStyle().Foreground(mutedTextColor),
+		tabActive: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("230")).
+			Background(activeTabColor).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(activeTabColor).
+			Padding(0, 1).
+			MarginRight(1),
+		tabInactive: lipgloss.NewStyle().
+			Foreground(inactiveTabColor).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(panelColor).
+			Padding(0, 1).
+			MarginRight(1),
+		panel: lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(panelColor).
+			Padding(0, 1),
+		instructions: lipgloss.NewStyle().Foreground(mutedTextColor),
+		metaLabel:    lipgloss.NewStyle().Foreground(mutedTextColor),
+		metaValue:    lipgloss.NewStyle().Foreground(infoColor),
+		status: lipgloss.NewStyle().
+			Foreground(statusOkColor).
+			Bold(true),
+		statusInfo: lipgloss.NewStyle().
+			Foreground(statusInfoColor).
+			Bold(true),
+		statusWarn: lipgloss.NewStyle().
+			Foreground(statusWarnColor).
+			Bold(true),
+		statusErr: lipgloss.NewStyle().
+			Foreground(statusErrColor).
+			Bold(true),
+		statusMuted: lipgloss.NewStyle().Foreground(mutedTextColor),
+		ultraBadge: lipgloss.NewStyle().
+			Foreground(infoColor).
+			Bold(true),
+		metaBar: lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(panelColor).
+			Padding(0, 1),
+	}
+}
 
 var (
 	tenancyNames         = make(map[string]string)
@@ -237,9 +312,28 @@ func configureDefaultDelegateDensity(d *list.DefaultDelegate, ultraCompact bool)
 	d.ShowDescription = true
 }
 
+func applyDelegateTheme(d *list.DefaultDelegate) {
+	normalTitle := lipgloss.NewStyle().Foreground(infoColor)
+	normalDesc := lipgloss.NewStyle().Foreground(mutedTextColor)
+	selectedTitle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("230")).
+		Background(activeTabColor).
+		Bold(true)
+	selectedDesc := lipgloss.NewStyle().Foreground(accentColor)
+
+	d.Styles.NormalTitle = normalTitle
+	d.Styles.NormalDesc = normalDesc
+	d.Styles.SelectedTitle = selectedTitle
+	d.Styles.SelectedDesc = selectedDesc
+	d.Styles.DimmedTitle = normalTitle.Foreground(mutedTextColor)
+	d.Styles.DimmedDesc = normalDesc
+	d.Styles.FilterMatch = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+}
+
 func newCompDelegate(pendingID *string, ultraCompact bool) *compDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
+	applyDelegateTheme(&d)
 	return &compDelegate{DefaultDelegate: d, pendingID: pendingID}
 }
 
@@ -280,6 +374,7 @@ type contextDelegate struct {
 func newContextDelegate(pendingName *string, ultraCompact bool) *contextDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
+	applyDelegateTheme(&d)
 	return &contextDelegate{DefaultDelegate: d, pendingName: pendingName}
 }
 
@@ -314,6 +409,7 @@ type tenancyDelegate struct {
 func newTenancyDelegate(pendingOCID *string, ultraCompact bool) *tenancyDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
+	applyDelegateTheme(&d)
 	return &tenancyDelegate{DefaultDelegate: d, pendingOCID: pendingOCID}
 }
 
@@ -342,6 +438,7 @@ func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 func newRegionDelegate(pendingName *string, ultraCompact bool) *regionDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
+	applyDelegateTheme(&d)
 	return &regionDelegate{DefaultDelegate: d, pendingName: pendingName}
 }
 
@@ -640,6 +737,9 @@ type tuiModel struct {
 	pendingTenancyOCID string              // tenancy pending OCID
 	ultraCompact       bool                // minimal chrome mode
 	initCmd            tea.Cmd             // optional startup command for shortcut modes
+	theme              tuiTheme
+	width              int
+	height             int
 }
 
 func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles map[string]ocicfg.Profile, startMode string) tuiModel {
@@ -694,10 +794,63 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	rl.SetFilteringEnabled(true)
 	rl.SetShowHelp(false)
 	rl.SetShowStatusBar(false)
-	m := tuiModel{list: l, tenancies: tn, cfg: cfg, cfgPath: cfgPath, mode: "contexts", profiles: profiles, comps: cl, regions: rl, compCache: make(map[string][]compItem), parentMap: make(map[string]string), nameMap: make(map[string]string), regionCache: make(map[string][]string)}
+	m := tuiModel{
+		list:        l,
+		tenancies:   tn,
+		cfg:         cfg,
+		cfgPath:     cfgPath,
+		mode:        "contexts",
+		profiles:    profiles,
+		comps:       cl,
+		regions:     rl,
+		compCache:   make(map[string][]compItem),
+		parentMap:   make(map[string]string),
+		nameMap:     make(map[string]string),
+		regionCache: make(map[string][]string),
+		theme:       newTUITheme(),
+		width:       defaultWidth,
+		height:      defaultHeight,
+	}
 	m.refreshDelegates()
 	m.applyStartMode(startMode)
+	m.resizeListsForViewport()
 	return m
+}
+
+func (m *tuiModel) resizeListsForViewport() {
+	if m.width <= 0 {
+		m.width = 80
+	}
+	if m.height <= 0 {
+		m.height = 20
+	}
+
+	panelInnerWidth := m.width - 4 // panel border + horizontal padding
+	if panelInnerWidth < 24 {
+		panelInnerWidth = 24
+	}
+
+	// Reserve lines for header/tabs/panel border/meta plus optional help/status.
+	reserved := 5
+	if !m.ultraCompact {
+		reserved++
+	}
+	if m.status != "" {
+		reserved++
+	}
+	if m.mode == "compartments" && m.crumb != "" {
+		reserved++
+	}
+
+	panelInnerHeight := m.height - reserved
+	if panelInnerHeight < 4 {
+		panelInnerHeight = 4
+	}
+
+	m.list.SetSize(panelInnerWidth, panelInnerHeight)
+	m.tenancies.SetSize(panelInnerWidth, panelInnerHeight)
+	m.comps.SetSize(panelInnerWidth, panelInnerHeight)
+	m.regions.SetSize(panelInnerWidth, panelInnerHeight)
 }
 
 func (m *tuiModel) refreshDelegates() {
@@ -817,18 +970,13 @@ func (m tuiModel) Init() tea.Cmd {
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.refreshDelegates()
+	m.resizeListsForViewport()
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		if m.mode == "contexts" {
-			m.list.SetSize(msg.Width, msg.Height)
-		} else if m.mode == "compartments" {
-			m.comps.SetSize(msg.Width, msg.Height)
-		} else if m.mode == "tenancies" {
-			m.tenancies.SetSize(msg.Width, msg.Height)
-		} else if m.mode == "regions" {
-			m.regions.SetSize(msg.Width, msg.Height)
-		}
+		m.width = msg.Width
+		m.height = msg.Height
+		m.resizeListsForViewport()
 	case tea.KeyMsg:
 		// If currently filtering, route all keys except Enter through the active list to avoid triggering hotkeys.
 		if m.mode == "contexts" && m.list.FilterState() == list.Filtering && msg.String() != "enter" {
@@ -1206,6 +1354,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "u":
 			m.ultraCompact = !m.ultraCompact
 			m.applyDensityMode()
+			m.resizeListsForViewport()
 			if m.ultraCompact {
 				m.status = "ULTRA mode: ON"
 			} else {
@@ -1271,56 +1420,191 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m tuiModel) View() string {
 	m.refreshDelegates()
 	if m.err != nil {
-		return fmt.Sprintf("error: %v", m.err)
+		return m.theme.panel.Render(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true).Render(fmt.Sprintf("error: %v", m.err)))
 	}
 	if m.finalized {
 		return fmt.Sprintf("Selected context %s with compartment %s\n", m.ctxItem.Name, m.parentID)
 	}
-	if m.mode == "contexts" {
-		meta := compactMeta(m)
-		if m.ultraCompact {
-			return fmt.Sprintf("%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render("[ULTRA] "+meta), m.list.View())
-		}
-		instructions := "ctx | enter drill • space stage • r regions • t tenancies • / filter • u ultra • q save • esc quit"
-		return fmt.Sprintf("%s\n%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render(instructions), lipgloss.NewStyle().Foreground(infoColor).Render(meta), m.list.View())
+	panelContent := m.activeListView()
+	if m.mode == "compartments" && m.crumb != "" {
+		panelContent = m.theme.statusMuted.Render(m.crumb) + "\n" + panelContent
 	}
-	if m.mode == "tenancies" {
-		meta := compactMeta(m)
-		view := m.tenancies.View()
-		if m.status != "" {
-			view = fmt.Sprintf("%s\n%s", m.status, view)
-		}
-		if m.ultraCompact {
-			return fmt.Sprintf("%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render("[ULTRA] "+meta), view)
-		}
-		instructions := "tenancy | enter use • space stage • backspace/P back • / filter • u ultra • q save • esc quit"
-		return fmt.Sprintf("%s\n%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render(instructions), lipgloss.NewStyle().Foreground(infoColor).Render(meta), view)
+
+	lines := []string{
+		m.renderHeader(),
+		m.renderTabs(),
+		m.theme.panel.Render(panelContent),
 	}
-	if m.mode == "regions" {
-		meta := compactMeta(m)
-		view := m.regions.View()
-		if m.status != "" {
-			view = fmt.Sprintf("%s\n%s", m.status, view)
-		}
-		if m.ultraCompact {
-			return fmt.Sprintf("%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render("[ULTRA] "+meta), view)
-		}
-		instructions := "region | space stage • enter apply+back • backspace/P back • / filter • u ultra • q save • esc quit"
-		return fmt.Sprintf("%s\n%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render(instructions), lipgloss.NewStyle().Foreground(infoColor).Render(meta), view)
+
+	if !m.ultraCompact {
+		lines = append(lines, m.theme.instructions.Render(modeInstructions(m.mode, m.width > 0 && m.width < 72)))
 	}
-	meta := compactMeta(m)
-	view := m.comps.View()
-	if m.crumb != "" {
-		view = fmt.Sprintf("%s\n%s", m.crumb, view)
-	}
+	lines = append(lines, m.renderMetaLine())
 	if m.status != "" {
-		view = fmt.Sprintf("%s\n%s", m.status, view)
+		lines = append(lines, m.renderStatusLine())
 	}
-	if m.ultraCompact {
-		return fmt.Sprintf("%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render("[ULTRA] "+meta), view)
+
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) renderStatusLine() string {
+	s := m.status
+	lower := strings.ToLower(s)
+	switch {
+	case strings.Contains(lower, "error"), strings.Contains(lower, "failed"):
+		return m.theme.statusErr.Render(s)
+	case strings.Contains(lower, "loading"):
+		return m.theme.statusWarn.Render(s)
+	case strings.Contains(lower, "select"):
+		return m.theme.statusInfo.Render(s)
+	default:
+		return m.theme.status.Render(s)
 	}
-	instructions := "comp | enter drill • space stage • backspace up • / filter • u ultra • q save • esc quit"
-	return fmt.Sprintf("%s\n%s\n%s", lipgloss.NewStyle().Foreground(infoColor).Render(instructions), lipgloss.NewStyle().Foreground(infoColor).Render(meta), view)
+}
+
+func (m tuiModel) activeListView() string {
+	switch m.mode {
+	case "contexts":
+		return m.list.View()
+	case "tenancies":
+		return m.tenancies.View()
+	case "regions":
+		return m.regions.View()
+	default:
+		return m.comps.View()
+	}
+}
+
+func (m tuiModel) renderHeader() string {
+	left := m.theme.headerTitle.Render("OCI Context")
+	if m.width > 0 && m.width < 64 {
+		return left
+	}
+	mode := strings.ToUpper(m.mode)
+	right := m.theme.headerSubtle.Render("Dashboard • " + mode)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+}
+
+func (m tuiModel) renderTabs() string {
+	compact := m.width > 0 && m.width < 64
+	labels := []struct {
+		mode  string
+		label string
+	}{
+		{mode: "contexts", label: "Contexts"},
+		{mode: "tenancies", label: "Tenancies"},
+		{mode: "compartments", label: "Compartments"},
+		{mode: "regions", label: "Regions"},
+	}
+	if compact {
+		labels = []struct {
+			mode  string
+			label string
+		}{
+			{mode: "contexts", label: "Ctx"},
+			{mode: "tenancies", label: "Ten"},
+			{mode: "compartments", label: "Comp"},
+			{mode: "regions", label: "Reg"},
+		}
+	}
+
+	rendered := make([]string, 0, len(labels))
+	for _, tab := range labels {
+		label := tab.label
+		if tab.mode == m.mode {
+			rendered = append(rendered, m.theme.tabActive.Render(label))
+			continue
+		}
+		rendered = append(rendered, m.theme.tabInactive.Render(label))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+}
+
+func (m tuiModel) renderMetaLine() string {
+	meta := compactMeta(m)
+	if m.width > 0 && m.width < 64 {
+		meta = compactMetaNarrow(m)
+	}
+	if !m.ultraCompact {
+		return m.theme.metaBar.Render(lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			m.theme.metaLabel.Render("state "),
+			m.theme.metaValue.Render(meta),
+		))
+	}
+	return m.theme.metaBar.Render(lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.theme.ultraBadge.Render("[ULTRA] "),
+		m.theme.metaValue.Render(meta),
+	))
+}
+
+func modeInstructions(mode string, compact bool) string {
+	if compact {
+		switch mode {
+		case "contexts":
+			return "enter drill • space stage • r/t switch • / filter • q save"
+		case "tenancies":
+			return "enter use • space stage • back/P • / filter • q save"
+		case "regions":
+			return "space stage • enter apply • back/P • / filter • q save"
+		default:
+			return "enter drill • space stage • back up • / filter • q save"
+		}
+	}
+	switch mode {
+	case "contexts":
+		return "ctx | enter drill • space stage • r regions • t tenancies • / filter • u ultra • q save • esc quit"
+	case "tenancies":
+		return "tenancy | enter use • space stage • backspace/P back • / filter • u ultra • q save • esc quit"
+	case "regions":
+		return "region | space stage • enter apply+back • backspace/P back • / filter • u ultra • q save • esc quit"
+	default:
+		return "comp | enter drill • space stage • backspace up • / filter • u ultra • q save • esc quit"
+	}
+}
+
+func compactMetaNarrow(m tuiModel) string {
+	staged := "-"
+	if m.pendingContextName != "" {
+		staged = "ctx:" + m.pendingContextName
+	}
+	if m.pendingTenancyOCID != "" {
+		staged = "ten:" + abbreviateOCID(m.pendingTenancyOCID)
+	}
+	if m.pendingSelectionID != "" {
+		staged = "comp:" + abbreviateOCID(m.pendingSelectionID)
+	}
+	if m.pendingRegion != "" {
+		staged = "reg:" + m.pendingRegion
+	}
+	filter := "off"
+	switch m.mode {
+	case "contexts":
+		if m.list.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	case "tenancies":
+		if m.tenancies.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	case "compartments":
+		if m.comps.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	case "regions":
+		if m.regions.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	}
+	current := m.ctxItem.Name
+	if current == "" {
+		current = m.cfg.CurrentContext
+	}
+	if current == "" {
+		current = "-"
+	}
+	return fmt.Sprintf("m:%s c:%s s:%s f:%s", m.mode, current, staged, filter)
 }
 
 func compactMeta(m tuiModel) string {
