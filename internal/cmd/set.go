@@ -10,7 +10,7 @@ import (
 func newSetCmd() *cobra.Command {
 	var cfgPath string
 	var useGlobal bool
-	var region, profile, tenancy, compartment, user, notes string
+	var region, profile, authMethod, tenancy, compartment, user, notes string
 
 	cmd := &cobra.Command{
 		Use:   "set <name>",
@@ -39,6 +39,9 @@ func newSetCmd() *cobra.Command {
 			}
 			if profile != "" {
 				ctx.Profile = profile
+			}
+			if authMethod != "" {
+				ctx.AuthMethod = authMethod
 			}
 			if tenancy != "" {
 				ctx.TenancyOCID = tenancy
@@ -72,6 +75,7 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
 	cmd.Flags().StringVarP(&region, "region", "r", "", "OCI region")
 	cmd.Flags().StringVarP(&profile, "profile", "p", "", "OCI CLI profile")
+	cmd.Flags().StringVarP(&authMethod, "auth-method", "a", "", "OCI auth method (api_key|security_token|instance_principal|resource_principal|instance_obo_user|oke_workload_identity)")
 	cmd.Flags().StringVarP(&tenancy, "tenancy", "t", "", "Tenancy OCID")
 	cmd.Flags().StringVarP(&compartment, "compartment", "m", "", "Compartment OCID")
 	cmd.Flags().StringVarP(&user, "user", "u", "", "User hint")

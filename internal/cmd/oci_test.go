@@ -9,6 +9,7 @@ import (
 func TestBuildOCIArgsAddsContextDefaultsWhenMissing(t *testing.T) {
 	ctx := config.Context{
 		Profile:         "DEFAULT",
+		AuthMethod:      "security_token",
 		Region:          "us-phoenix-1",
 		CompartmentOCID: "ocid1.compartment.oc1..abc",
 	}
@@ -19,6 +20,7 @@ func TestBuildOCIArgsAddsContextDefaultsWhenMissing(t *testing.T) {
 		"iam", "region", "list",
 		"--config-file", "/Users/me/.oci/config",
 		"--profile", "DEFAULT",
+		"--auth", "security_token",
 		"--region", "us-phoenix-1",
 		"--compartment-id", "ocid1.compartment.oc1..abc",
 	}

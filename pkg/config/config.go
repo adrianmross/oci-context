@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
@@ -28,6 +29,7 @@ type Options struct {
 type Context struct {
 	Name            string `yaml:"name"`
 	Profile         string `yaml:"profile"`
+	AuthMethod      string `yaml:"auth_method,omitempty"`
 	TenancyOCID     string `yaml:"tenancy_ocid"`
 	CompartmentOCID string `yaml:"compartment_ocid"`
 	Region          string `yaml:"region"`
@@ -39,6 +41,44 @@ var (
 	ErrContextNotFound = errors.New("context not found")
 	ErrDuplicateName   = errors.New("context name already exists")
 )
+
+const (
+	AuthMethodAPIKey            = "api_key"
+	AuthMethodSecurityToken     = "security_token"
+	AuthMethodInstancePrincipal = "instance_principal"
+	AuthMethodResourcePrincipal = "resource_principal"
+	AuthMethodInstanceOBOUser   = "instance_obo_user"
+	AuthMethodOKEWorkload       = "oke_workload_identity"
+)
+
+func ValidAuthMethods() []string {
+	return []string{
+		AuthMethodAPIKey,
+		AuthMethodSecurityToken,
+		AuthMethodInstancePrincipal,
+		AuthMethodResourcePrincipal,
+		AuthMethodInstanceOBOUser,
+		AuthMethodOKEWorkload,
+	}
+}
+
+func NormalizeAuthMethod(v string) string {
+	v = strings.TrimSpace(strings.ToLower(v))
+	if v == "" {
+		return AuthMethodAPIKey
+	}
+	return v
+}
+
+func IsValidAuthMethod(v string) bool {
+	v = NormalizeAuthMethod(v)
+	for _, m := range ValidAuthMethods() {
+		if v == m {
+			return true
+		}
+	}
+	return false
+}
 
 // DefaultConfig returns the initial config.
 func DefaultConfig(home string) Config {
@@ -164,6 +204,9 @@ func (ctx Context) Validate() error {
 	}
 	if ctx.CompartmentOCID == "" {
 		return fmt.Errorf("context compartment_ocid is required")
+	}
+	if !IsValidAuthMethod(ctx.AuthMethod) {
+		return fmt.Errorf("context auth_method %q is invalid", ctx.AuthMethod)
 	}
 	return nil
 }

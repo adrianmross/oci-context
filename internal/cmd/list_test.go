@@ -70,8 +70,8 @@ func TestListOutputs(t *testing.T) {
 					t.Fatalf("unexpected error: %v", err)
 				}
 				want := strings.Join([]string{
-					"* dev (profile=DEFAULT region=us-phoenix-1 tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc)",
-					"  prod (profile=PROD region=us-ashburn-1 tenancy=ocid1.tenancy.oc1..zzzz compartment=ocid1.compartment.oc1..yyyy user=ocid1.user.oc1..xxxx)",
+					"* dev (profile=DEFAULT auth=api_key region=us-phoenix-1 tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc)",
+					"  prod (profile=PROD auth=api_key region=us-ashburn-1 tenancy=ocid1.tenancy.oc1..zzzz compartment=ocid1.compartment.oc1..yyyy user=ocid1.user.oc1..xxxx)",
 					"",
 				}, "\n")
 				if got != want {
@@ -88,8 +88,8 @@ func TestListOutputs(t *testing.T) {
 					t.Fatalf("unexpected error: %v", err)
 				}
 				want := strings.Join([]string{
-					"context=dev* profile=DEFAULT region=us-phoenix-1 tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc notes=dev-notes",
-					"context=prod profile=PROD region=us-ashburn-1 tenancy=ocid1.tenancy.oc1..zzzz compartment=ocid1.compartment.oc1..yyyy user=ocid1.user.oc1..xxxx notes=",
+					"context=dev* profile=DEFAULT auth=api_key region=us-phoenix-1 tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc notes=dev-notes",
+					"context=prod profile=PROD auth=api_key region=us-ashburn-1 tenancy=ocid1.tenancy.oc1..zzzz compartment=ocid1.compartment.oc1..yyyy user=ocid1.user.oc1..xxxx notes=",
 					"",
 				}, "\n")
 				if got != want {

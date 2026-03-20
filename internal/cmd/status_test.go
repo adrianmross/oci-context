@@ -79,6 +79,7 @@ func TestStatusOutputs(t *testing.T) {
 			args: []string{"status"},
 			want: strings.Join([]string{
 				"context: dev",
+				"auth: api_key",
 				"tenancy: Tenancy Friendly (ocid1.tenancy.oc1..aaaa)",
 				"compartment: Compartment Friendly (ocid1.compartment.oc1..bbbb)",
 				"user: User Friendly (ocid1.user.oc1..userX)",
@@ -93,6 +94,7 @@ func TestStatusOutputs(t *testing.T) {
 			want: strings.Join([]string{
 				"context: dev",
 				"profile: DEFAULT",
+				"auth: api_key",
 				"tenancy: Tenancy Friendly (ocid1.tenancy.oc1..aaaa)",
 				"compartment: Compartment Friendly (ocid1.compartment.oc1..bbbb)",
 				"user: User Friendly (ocid1.user.oc1..cccc)",
@@ -104,25 +106,26 @@ func TestStatusOutputs(t *testing.T) {
 			name:      "plain OCIDs only (-p)",
 			mutateCfg: func(c config.Config) config.Config { return c },
 			args:      []string{"status", "-p"},
-			want:      "context=dev profile=DEFAULT tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc region=us-phoenix-1\n",
+			want:      "context=dev profile=DEFAULT auth=api_key tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc region=us-phoenix-1\n",
 		},
 		{
 			name:      "plain friendly single-line (-o plain)",
 			mutateCfg: func(c config.Config) config.Config { return c },
 			args:      []string{"status", "-o", "plain"},
-			want:      "context=dev profile=DEFAULT tenancy=Tenancy Friendly (" + abbrevOCID("ocid1.tenancy.oc1..aaaa") + ") compartment=Compartment Friendly (" + abbrevOCID("ocid1.compartment.oc1..bbbb") + ") user=User Friendly (" + abbrevOCID("ocid1.user.oc1..cccc") + ") region=us-phoenix-1\n",
+			want:      "context=dev profile=DEFAULT auth=api_key tenancy=Tenancy Friendly (" + abbrevOCID("ocid1.tenancy.oc1..aaaa") + ") compartment=Compartment Friendly (" + abbrevOCID("ocid1.compartment.oc1..bbbb") + ") user=User Friendly (" + abbrevOCID("ocid1.user.oc1..cccc") + ") region=us-phoenix-1\n",
 		},
 		{
 			name:      "json output",
 			mutateCfg: func(c config.Config) config.Config { return c },
 			args:      []string{"status", "-o", "json"},
-			want:      "{\n  \"compartment\": \"Compartment Friendly\",\n  \"compartment_id\": \"ocid1.compartment.oc1..bbbb\",\n  \"context\": \"dev\",\n  \"profile\": \"DEFAULT\",\n  \"region\": \"us-phoenix-1\",\n  \"tenancy\": \"Tenancy Friendly\",\n  \"tenancy_id\": \"ocid1.tenancy.oc1..aaaa\",\n  \"user\": \"User Friendly\",\n  \"user_id\": \"ocid1.user.oc1..cccc\"\n}\n",
+			want:      "{\n  \"auth_method\": \"api_key\",\n  \"compartment\": \"Compartment Friendly\",\n  \"compartment_id\": \"ocid1.compartment.oc1..bbbb\",\n  \"context\": \"dev\",\n  \"profile\": \"DEFAULT\",\n  \"region\": \"us-phoenix-1\",\n  \"tenancy\": \"Tenancy Friendly\",\n  \"tenancy_id\": \"ocid1.tenancy.oc1..aaaa\",\n  \"user\": \"User Friendly\",\n  \"user_id\": \"ocid1.user.oc1..cccc\"\n}\n",
 		},
 		{
 			name:      "yaml output",
 			mutateCfg: func(c config.Config) config.Config { return c },
 			args:      []string{"status", "-o", "yaml"},
 			want: strings.Join([]string{
+				"auth_method: api_key",
 				"compartment: Compartment Friendly",
 				"compartment_id: ocid1.compartment.oc1..bbbb",
 				"context: dev",

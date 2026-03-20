@@ -52,6 +52,7 @@ func newImportCmd() *cobra.Command {
 				ctx := config.Context{
 					Name:            name,
 					Profile:         name,
+					AuthMethod:      config.AuthMethodAPIKey,
 					TenancyOCID:     p.Tenancy,
 					CompartmentOCID: p.Tenancy, // default to root compartment
 					Region:          p.Region,

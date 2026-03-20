@@ -70,6 +70,10 @@ func buildOCIArgs(args []string, ctx config.Context, ociConfigPath string) []str
 	if !hasOCIFlag(args, "--profile", "") && ctx.Profile != "" {
 		out = append(out, "--profile", ctx.Profile)
 	}
+	authMethod := config.NormalizeAuthMethod(ctx.AuthMethod)
+	if !hasOCIFlag(args, "--auth", "") && authMethod != "" {
+		out = append(out, "--auth", authMethod)
+	}
 	if !hasOCIFlag(args, "--region", "") && ctx.Region != "" {
 		out = append(out, "--region", ctx.Region)
 	}

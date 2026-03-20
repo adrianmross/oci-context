@@ -54,6 +54,7 @@ func newStatusCmd() *cobra.Command {
 			resp := map[string]string{
 				"context":        ctx.Name,
 				"profile":        ctx.Profile,
+				"auth_method":    config.NormalizeAuthMethod(ctx.AuthMethod),
 				"tenancy":        details.TenancyName,
 				"tenancy_id":     details.TenancyOCID,
 				"compartment":    details.CompartmentName,
@@ -64,8 +65,8 @@ func newStatusCmd() *cobra.Command {
 			}
 			if plain {
 				line := fmt.Sprintf(
-					"context=%s profile=%s tenancy=%s compartment=%s user=%s region=%s",
-					resp["context"], resp["profile"], resp["tenancy_id"], resp["compartment_id"], resp["user_id"], resp["region"],
+					"context=%s profile=%s auth=%s tenancy=%s compartment=%s user=%s region=%s",
+					resp["context"], resp["profile"], resp["auth_method"], resp["tenancy_id"], resp["compartment_id"], resp["user_id"], resp["region"],
 				)
 				fmt.Fprintln(cmd.OutOrStdout(), line)
 				return nil
@@ -77,6 +78,7 @@ func newStatusCmd() *cobra.Command {
 				if resp["context"] != resp["profile"] {
 					fmt.Fprintf(cmd.OutOrStdout(), "profile: %s\n", resp["profile"])
 				}
+				fmt.Fprintf(cmd.OutOrStdout(), "auth: %s\n", resp["auth_method"])
 				fmt.Fprintf(cmd.OutOrStdout(), "tenancy: %s (%s)\n", resp["tenancy"], resp["tenancy_id"])
 				fmt.Fprintf(cmd.OutOrStdout(), "compartment: %s (%s)\n", resp["compartment"], resp["compartment_id"])
 				fmt.Fprintf(cmd.OutOrStdout(), "user: %s (%s)\n", resp["user"], resp["user_id"])
@@ -96,8 +98,9 @@ func newStatusCmd() *cobra.Command {
 					profilePart = fmt.Sprintf(" profile=%s", resp["profile"])
 				}
 				line := fmt.Sprintf(
-					"context=%s%s tenancy=%s (%s) compartment=%s (%s) user=%s (%s) region=%s",
+					"context=%s%s auth=%s tenancy=%s (%s) compartment=%s (%s) user=%s (%s) region=%s",
 					resp["context"], profilePart,
+					resp["auth_method"],
 					resp["tenancy"], abbrevOCID(resp["tenancy_id"]),
 					resp["compartment"], abbrevOCID(resp["compartment_id"]),
 					resp["user"], abbrevOCID(resp["user_id"]),

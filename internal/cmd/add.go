@@ -47,6 +47,7 @@ func newAddCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	cmd.Flags().StringVarP(&ctx.Name, "name", "n", "", "Context name")
 	cmd.Flags().StringVarP(&ctx.Profile, "profile", "p", "", "OCI CLI profile")
+	cmd.Flags().StringVarP(&ctx.AuthMethod, "auth-method", "a", config.AuthMethodAPIKey, "OCI auth method (api_key|security_token|instance_principal|resource_principal|instance_obo_user|oke_workload_identity)")
 	cmd.Flags().StringVarP(&ctx.TenancyOCID, "tenancy", "t", "", "Tenancy OCID")
 	cmd.Flags().StringVarP(&ctx.CompartmentOCID, "compartment", "m", "", "Compartment OCID")
 	cmd.Flags().StringVarP(&ctx.Region, "region", "r", "", "OCI region")
