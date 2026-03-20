@@ -103,3 +103,23 @@ func TestAllowAttemptBlockedAfterFailure(t *testing.T) {
 		t.Fatalf("expected allowAttempt to be true after backoff window")
 	}
 }
+
+func TestMonitoredContextNamesFallbackAndDedup(t *testing.T) {
+	cfg := config.Config{CurrentContext: "cur"}
+	got := monitoredContextNames(cfg)
+	if len(got) != 1 || got[0] != "cur" {
+		t.Fatalf("expected fallback to current context, got %v", got)
+	}
+
+	cfg.Options.DaemonContexts = []string{"a", " ", "b", "a", "b", "c"}
+	got = monitoredContextNames(cfg)
+	want := []string{"a", "b", "c"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
+	}
+}

@@ -334,18 +334,23 @@ func (s *Service) maintainAuth(reason string) {
 		return
 	}
 	cfg := s.currentConfig()
-	if cfg.CurrentContext == "" {
+	targets := monitoredContextNames(cfg)
+	if len(targets) == 0 {
 		s.setStatusError("", "", "no current context set")
 		return
 	}
-	ctx, err := cfg.GetContext(cfg.CurrentContext)
-	if err != nil {
-		s.setStatusError(cfg.CurrentContext, "", err.Error())
-		return
+	for _, ctxName := range targets {
+		ctx, err := cfg.GetContext(ctxName)
+		if err != nil {
+			s.setStatusError(ctxName, "", err.Error())
+			continue
+		}
+		s.maintainAuthForContext(cfg, ctxName, ctx, reason)
 	}
-	ctxName := cfg.CurrentContext
-	method := config.NormalizeAuthMethod(ctx.AuthMethod)
+}
 
+func (s *Service) maintainAuthForContext(cfg config.Config, ctxName string, ctx config.Context, reason string) {
+	method := config.NormalizeAuthMethod(ctx.AuthMethod)
 	s.statusMu.Lock()
 	st := s.status[ctxName]
 	st.ContextName = ctxName
@@ -369,6 +374,26 @@ func (s *Service) maintainAuth(reason string) {
 		s.refreshSecurityToken(cfg, ctxName, ctx, "validate-failed")
 		_ = s.validateCurrentContext(cfg, ctxName, ctx, "post-failed-validate-refresh")
 	}
+}
+
+func monitoredContextNames(cfg config.Config) []string {
+	if len(cfg.Options.DaemonContexts) == 0 {
+		if cfg.CurrentContext == "" {
+			return nil
+		}
+		return []string{cfg.CurrentContext}
+	}
+	seen := make(map[string]bool, len(cfg.Options.DaemonContexts))
+	out := make([]string, 0, len(cfg.Options.DaemonContexts))
+	for _, name := range cfg.Options.DaemonContexts {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 func (s *Service) setStatusError(ctxName, method, msg string) {
