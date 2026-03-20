@@ -36,6 +36,9 @@ func newAddCmd() *cobra.Command {
 			if err := config.Save(path, cfg); err != nil {
 				return err
 			}
+			if err := syncOCIDefaultsForCurrent(cfg); err != nil {
+				return err
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Added/updated context %s\n", ctx.Name)
 			return nil
 		},

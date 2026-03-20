@@ -1782,6 +1782,10 @@ func (m tuiModel) finalizeSelection() (tea.Model, tea.Cmd) {
 		m.err = err
 		return m, tea.Quit
 	}
+	if err := syncOCIDefaultsForCurrent(m.cfg); err != nil {
+		m.err = err
+		return m, tea.Quit
+	}
 	return m, tea.Quit
 }
 

@@ -31,7 +31,10 @@ func newUseCmd() *cobra.Command {
 				return err
 			}
 			cfg.CurrentContext = name
-			return config.Save(path, cfg)
+			if err := config.Save(path, cfg); err != nil {
+				return err
+			}
+			return syncOCIDefaultsForCurrent(cfg)
 		},
 	}
 
