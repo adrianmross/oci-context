@@ -49,3 +49,27 @@ func TestAuthMethodsCommandOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestFindHomeRegion(t *testing.T) {
+	payload := []byte(`{
+  "data": [
+    {"is-home-region": false, "region-key": "PHX", "region-name": "us-phoenix-1", "status": "READY"},
+    {"is-home-region": true, "region-key": "IAD", "region-name": "us-ashburn-1", "status": "READY"}
+  ]
+}`)
+	region, err := findHomeRegion(payload)
+	if err != nil {
+		t.Fatalf("expected home region, got error %v", err)
+	}
+	if region.RegionName != "us-ashburn-1" || region.RegionKey != "IAD" || !region.IsHomeRegion {
+		t.Fatalf("unexpected home region parsed: %+v", region)
+	}
+}
+
+func TestFindHomeRegionReturnsErrorWhenMissing(t *testing.T) {
+	payload := []byte(`{"data":[{"is-home-region":false,"region-key":"PHX","region-name":"us-phoenix-1","status":"READY"}]}`)
+	_, err := findHomeRegion(payload)
+	if err == nil {
+		t.Fatalf("expected error when home region is missing")
+	}
+}

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -86,6 +87,44 @@ func runOCI(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return nil
+}
+
+func runOCICapture(cmd *cobra.Command, args []string) ([]byte, error) {
+	ociCmd := exec.CommandContext(cmd.Context(), "oci", args...)
+	ociCmd.Stdin = cmd.InOrStdin()
+	ociCmd.Stderr = cmd.ErrOrStderr()
+	out, err := ociCmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.Error); ok && ee.Err != nil {
+			return nil, fmt.Errorf("failed to execute oci CLI (%w): install with `pip install oci-cli` or ensure it is in PATH", ee.Err)
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
+type regionSubscriptionList struct {
+	Data []regionSubscription `json:"data"`
+}
+
+type regionSubscription struct {
+	IsHomeRegion bool   `json:"is-home-region"`
+	RegionKey    string `json:"region-key"`
+	RegionName   string `json:"region-name"`
+	Status       string `json:"status"`
+}
+
+func findHomeRegion(payload []byte) (regionSubscription, error) {
+	var list regionSubscriptionList
+	if err := json.Unmarshal(payload, &list); err != nil {
+		return regionSubscription{}, err
+	}
+	for _, region := range list.Data {
+		if region.IsHomeRegion {
+			return region, nil
+		}
+	}
+	return regionSubscription{}, fmt.Errorf("home region not found in OCI region subscriptions")
 }
 
 func buildAuthValidateOCIArgs(ctx config.Context, ociConfigPath string) []string {
@@ -319,10 +358,23 @@ func newAuthCmd() *cobra.Command {
 			}
 			method := config.NormalizeAuthMethod(ctx.AuthMethod)
 			ociArgs := buildAuthValidateOCIArgs(ctx, cfg.Options.OCIConfigPath)
-			if err := runOCI(cmd, ociArgs); err != nil {
+			out, err := runOCICapture(cmd, ociArgs)
+			if err != nil {
 				return fmt.Errorf("auth validate failed for method %s: %w", method, err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Auth validate succeeded for %s (%s)\n", ctx.Name, method)
+			homeRegion, err := findHomeRegion(out)
+			if err != nil {
+				return fmt.Errorf("auth validate succeeded but could not resolve home-region context: %w", err)
+			}
+			fmt.Fprintf(
+				cmd.OutOrStdout(),
+				"Auth validate succeeded for %s (%s)\ncontext: home-region=%s (%s) status=%s\n",
+				ctx.Name,
+				method,
+				homeRegion.RegionName,
+				homeRegion.RegionKey,
+				homeRegion.Status,
+			)
 			return nil
 		},
 	})
