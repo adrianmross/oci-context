@@ -1399,11 +1399,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setModeVerbose(m.mode, next)
 			m.refreshDelegates()
 			m.resizeListsForViewport()
-			if err := saveTUIPrefs(m.prefsPath, m.prefs); err != nil {
-				m.status = fmt.Sprintf("Verbose %s for %s (prefs not saved: %v)", onOff(next), m.mode, err)
-				return m, nil
-			}
-			m.status = fmt.Sprintf("Verbose %s for %s", onOff(next), m.mode)
+			m.status = fmt.Sprintf("Verbose %s for %s (session)", onOff(next), m.mode)
 			return m, nil
 		}
 	}
