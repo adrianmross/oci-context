@@ -431,15 +431,21 @@ func newContextDelegate(pendingName *string, ultraCompact bool) *contextDelegate
 
 func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	if _, ok := listItem.(separatorItem); ok {
+		if d.ultraCompact {
+			// In compact mode, draw only one divider at section boundaries.
+			return
+		}
 		line := strings.Repeat("─", 36)
 		fmt.Fprint(w, lipgloss.NewStyle().Foreground(panelColor).Render(line))
 		return
 	}
 	if si, ok := listItem.(sectionItem); ok {
 		if d.ultraCompact {
-			// In compact modes, keep visual grouping but avoid bulky headers.
-			line := strings.Repeat("─", 24)
-			fmt.Fprint(w, lipgloss.NewStyle().Foreground(panelColor).Render(line))
+			// In compact mode, keep exactly one divider between CONTEXTS and PROFILES.
+			if strings.EqualFold(si.title, "PROFILES") && index > 0 {
+				line := strings.Repeat("─", 36)
+				fmt.Fprint(w, lipgloss.NewStyle().Foreground(panelColor).Render(line))
+			}
 			return
 		}
 		fmt.Fprint(w, lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true).Render(si.Title()))
