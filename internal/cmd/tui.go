@@ -1476,14 +1476,19 @@ func (m tuiModel) View() string {
 		m.theme.panel.Render(panelContent),
 	}
 
-	if !m.ultraCompact {
-		if m.helpVisible {
-			lines = append(lines, m.theme.panel.Render(m.renderHelpPanel()))
-		} else {
-			lines = append(lines, m.theme.instructions.Render(modeInstructions(m.mode, m.width > 0 && m.width < 72)))
-		}
+	if !m.ultraCompact && m.helpVisible {
+		lines = append(lines, m.theme.panel.Render(m.renderHelpPanel()))
 	}
-	lines = append(lines, m.renderMetaLine())
+
+	if m.shouldInlineHotkeys() {
+		lines = append(lines, m.renderMetaLineWithHotkeys())
+	} else {
+		if !m.ultraCompact && !m.helpVisible {
+			lines = append(lines, m.theme.instructions.Render(primaryHotkeys(m.width > 0 && m.width < 72)))
+		}
+		lines = append(lines, m.renderMetaLine())
+	}
+
 	if m.status != "" {
 		lines = append(lines, m.renderStatusLine())
 	}
@@ -1583,29 +1588,34 @@ func (m tuiModel) renderMetaLine() string {
 	))
 }
 
-func modeInstructions(mode string, compact bool) string {
+func (m tuiModel) renderMetaLineWithHotkeys() string {
+	meta := compactMeta(m)
+	if m.width > 0 && m.width < 90 {
+		meta = compactMetaNarrow(m)
+	}
+	hotkeys := primaryHotkeys(m.width > 0 && m.width < 90)
+	return m.theme.metaBar.Render(lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.theme.metaLabel.Render("state "),
+		m.theme.metaValue.Render(meta),
+		m.theme.metaLabel.Render("  keys "),
+		m.theme.instructions.Render(hotkeys),
+	))
+}
+
+func (m tuiModel) shouldInlineHotkeys() bool {
+	if m.ultraCompact || m.helpVisible {
+		return false
+	}
+	// Keep one-line state+keys only when there is room to avoid wrapping noise.
+	return m.width >= 116
+}
+
+func primaryHotkeys(compact bool) string {
 	if compact {
-		switch mode {
-		case "contexts":
-			return "enter drill • space stage • r/t switch • / filter • q save • ? help"
-		case "tenancies":
-			return "enter use • space stage • back/P • / filter • q save • ? help"
-		case "regions":
-			return "space stage • enter apply • back/P • / filter • q save • ? help"
-		default:
-			return "enter drill • space stage • back up • / filter • q save • ? help"
-		}
+		return "enter/backspace drill/up • space stage • / filter • q save • ? help"
 	}
-	switch mode {
-	case "contexts":
-		return "enter drill • space stage • r regions • t tenancies • / filter • u ultra • q save • esc quit • ? help"
-	case "tenancies":
-		return "enter use • space stage • backspace/P back • / filter • u ultra • q save • esc quit • ? help"
-	case "regions":
-		return "space stage • enter apply+back • backspace/P back • / filter • u ultra • q save • esc quit • ? help"
-	default:
-		return "enter drill • space stage • backspace up • / filter • u ultra • q save • esc quit • ? help"
-	}
+	return "enter/backspace drill/up • space toggle-stage • / filter • q save • esc quit • ? help"
 }
 
 func (m tuiModel) renderHelpPanel() string {
