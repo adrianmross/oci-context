@@ -64,14 +64,10 @@ func newTUITheme() tuiTheme {
 			Bold(true).
 			Foreground(lipgloss.Color("230")).
 			Background(activeTabColor).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(activeTabColor).
 			Padding(0, 1).
 			MarginRight(1),
 		tabInactive: lipgloss.NewStyle().
 			Foreground(inactiveTabColor).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(panelColor).
 			Padding(0, 1).
 			MarginRight(1),
 		panel: lipgloss.NewStyle().
@@ -97,10 +93,7 @@ func newTUITheme() tuiTheme {
 		ultraBadge: lipgloss.NewStyle().
 			Foreground(infoColor).
 			Bold(true),
-		metaBar: lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(panelColor).
-			Padding(0, 1),
+		metaBar: lipgloss.NewStyle(),
 		gridCell: lipgloss.NewStyle().
 			Padding(0, 1),
 		gridSelected: lipgloss.NewStyle().
@@ -876,9 +869,11 @@ func (m *tuiModel) resizeListsForViewport() {
 		panelInnerWidth = 24
 	}
 
-	// Reserve lines for header/tabs/panel border/meta plus optional help/status.
+	// Reserve lines for top chrome so list content doesn't push header/tabs out of view.
+	// header(1) + tabs(1) + panel border(2) + meta(1)
 	reserved := 5
-	if !m.ultraCompact {
+	if !m.ultraCompact && !m.helpVisible && !m.shouldInlineHotkeys() {
+		// one extra row for condensed key hints when not inlined with state
 		reserved++
 	}
 	if m.status != "" {
@@ -909,21 +904,11 @@ func (m *tuiModel) refreshDelegates() {
 }
 
 func (m *tuiModel) applyDensityMode() {
-	if m.ultraCompact {
-		m.list.Title = ""
-		m.tenancies.Title = ""
-		m.comps.Title = ""
-		m.regions.Title = ""
-		return
-	}
-	m.list.Title = "Select OCI context"
-	m.tenancies.Title = "Select tenancy"
-	if m.parentCrumb != "" {
-		m.comps.Title = fmt.Sprintf("Select compartment under %s", m.parentCrumb)
-	} else {
-		m.comps.Title = "Select compartment (lazy load)"
-	}
-	m.regions.Title = "Select region"
+	// Keep list titles hidden; tabs/header already provide context and this saves vertical space.
+	m.list.Title = ""
+	m.tenancies.Title = ""
+	m.comps.Title = ""
+	m.regions.Title = ""
 }
 
 // selectInitialContext picks the current context if present, else the first context item.
@@ -1744,13 +1729,13 @@ func (m tuiModel) isStagedItem(item list.Item) bool {
 }
 
 func (m tuiModel) renderHeader() string {
-	left := m.theme.headerTitle.Render("OCI Context")
-	if m.width > 0 && m.width < 64 {
-		return left
-	}
 	mode := strings.ToUpper(m.mode)
-	right := m.theme.headerSubtle.Render("Dashboard • " + mode)
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.theme.headerTitle.Render("OCI Context"),
+		" ",
+		m.theme.headerSubtle.Render("• "+mode),
+	)
 }
 
 func (m tuiModel) renderTabs() string {
