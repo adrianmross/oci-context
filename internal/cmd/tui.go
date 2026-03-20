@@ -1251,6 +1251,13 @@ func (m *tuiModel) resizeListsForViewport() {
 	if m.mode == "compartments" && m.crumb != "" {
 		reserved++
 	}
+	if m.activeListFilterState() == list.Unfiltered {
+		// Reserve space for ghost filter hint + optional breathing line.
+		reserved++
+		if m.height >= 18 {
+			reserved++
+		}
+	}
 
 	panelInnerHeight := m.height - reserved
 	if panelInnerHeight < 4 {
@@ -1974,7 +1981,7 @@ func (m tuiModel) View() string {
 	panelContent := m.activeListView()
 	if m.activeListFilterState() == list.Unfiltered {
 		gap := "\n"
-		if m.panelInnerHeight >= 8 {
+		if m.height >= 18 {
 			gap = "\n\n"
 		}
 		panelContent = m.theme.statusMuted.Render("Filter: press / to filter") + gap + panelContent
