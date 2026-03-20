@@ -793,6 +793,9 @@ func TestTUIFilterPlaceholderHintIsSet(t *testing.T) {
 	if m.regions.FilterInput.Placeholder != filterPlaceholderHint {
 		t.Fatalf("expected regions filter placeholder %q, got %q", filterPlaceholderHint, m.regions.FilterInput.Placeholder)
 	}
+	if m.list.ShowFilter() || m.tenancies.ShowFilter() || m.comps.ShowFilter() || m.regions.ShowFilter() {
+		t.Fatalf("expected filter bars hidden by default when unfiltered")
+	}
 }
 
 func TestWithCurrentMarkerAddsLabel(t *testing.T) {
@@ -891,6 +894,19 @@ func TestTUIRenderTabsShowsStagedDotPerMenu(t *testing.T) {
 	}
 	if !strings.Contains(tabs, "●") {
 		t.Fatalf("expected staged dot in tab bar, got %q", tabs)
+	}
+}
+
+func TestTUIViewShowsGhostFilterHintWhenUnfiltered(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	view := m.View()
+	if !strings.Contains(view, "Filter: press / to filter") {
+		t.Fatalf("expected ghost filter hint, got %q", view)
 	}
 }
 

@@ -1128,12 +1128,14 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	l.Title = "Select OCI context"
 	l.SetFilteringEnabled(true)
 	l.FilterInput.Placeholder = filterPlaceholderHint
+	l.SetShowFilter(false)
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	tn := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	tn.Title = "Select tenancy"
 	tn.SetFilteringEnabled(true)
 	tn.FilterInput.Placeholder = filterPlaceholderHint
+	tn.SetShowFilter(false)
 	tn.SetShowHelp(false)
 	tn.SetShowStatusBar(false)
 	if len(profiles) > 0 {
@@ -1163,6 +1165,7 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	cl.Title = "Select compartment (lazy load)"
 	cl.SetFilteringEnabled(true)
 	cl.FilterInput.Placeholder = filterPlaceholderHint
+	cl.SetShowFilter(false)
 	cl.SetShowHelp(false)
 	cl.SetShowStatusBar(false)
 	// delegate with pending highlight is attached after model creation
@@ -1170,6 +1173,7 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	rl.Title = "Select region"
 	rl.SetFilteringEnabled(true)
 	rl.FilterInput.Placeholder = filterPlaceholderHint
+	rl.SetShowFilter(false)
 	rl.SetShowHelp(false)
 	rl.SetShowStatusBar(false)
 	m := tuiModel{
@@ -1560,6 +1564,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.comps.FilterState() == list.FilterApplied {
 						m.comps.SetFilterText("")
 						m.comps.SetFilterState(list.Unfiltered)
+						m.comps.SetShowFilter(false)
 					}
 					m.parentID = item.oc.ID
 					m.parentCrumb = item.oc.Name
@@ -1827,21 +1832,25 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.list.SetFilteringEnabled(true)
 				m.list.SetFilterText("")
 				m.list.SetFilterState(list.Filtering)
+				m.list.SetShowFilter(true)
 			}
 			if m.mode == "compartments" {
 				m.comps.SetFilteringEnabled(true)
 				m.comps.SetFilterText("")
 				m.comps.SetFilterState(list.Filtering)
+				m.comps.SetShowFilter(true)
 			}
 			if m.mode == "tenancies" {
 				m.tenancies.SetFilteringEnabled(true)
 				m.tenancies.SetFilterText("")
 				m.tenancies.SetFilterState(list.Filtering)
+				m.tenancies.SetShowFilter(true)
 			}
 			if m.mode == "regions" {
 				m.regions.SetFilteringEnabled(true)
 				m.regions.SetFilterText("")
 				m.regions.SetFilterState(list.Filtering)
+				m.regions.SetShowFilter(true)
 			}
 			return m, nil
 		case "?":
@@ -1959,6 +1968,9 @@ func (m tuiModel) View() string {
 		return fmt.Sprintf("Selected context %s with compartment %s\n", m.ctxItem.Name, m.parentID)
 	}
 	panelContent := m.activeListView()
+	if m.activeListFilterState() == list.Unfiltered {
+		panelContent = m.theme.statusMuted.Render("Filter: press / to filter") + "\n" + panelContent
+	}
 	if m.mode == "compartments" && m.crumb != "" {
 		panelContent = m.theme.statusMuted.Render(m.crumb) + "\n" + panelContent
 	}
@@ -2050,6 +2062,7 @@ func (m *tuiModel) clearActiveAppliedFilter() {
 	l := m.activeListModel()
 	l.SetFilterText("")
 	l.SetFilterState(list.Unfiltered)
+	l.SetShowFilter(false)
 	m.setActiveListModel(l)
 }
 
@@ -2057,6 +2070,11 @@ func (m tuiModel) updateActiveList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	l := m.activeListModel()
 	l, cmd = l.Update(msg)
+	if l.FilterState() == list.Unfiltered {
+		l.SetShowFilter(false)
+	} else {
+		l.SetShowFilter(true)
+	}
 	m.setActiveListModel(l)
 	if km, ok := msg.(tea.KeyMsg); ok && m.mode == "contexts" && isVerticalNavKey(km.String()) {
 		m.skipNonContextRows(navDirection(km.String()))
