@@ -436,6 +436,12 @@ func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 		return
 	}
 	if si, ok := listItem.(sectionItem); ok {
+		if d.ultraCompact {
+			// In compact modes, keep visual grouping but avoid bulky headers.
+			line := strings.Repeat("─", 24)
+			fmt.Fprint(w, lipgloss.NewStyle().Foreground(panelColor).Render(line))
+			return
+		}
 		fmt.Fprint(w, lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true).Render(si.Title()))
 		return
 	}
@@ -559,6 +565,14 @@ func contextsFromConfig(cfg config.Config, profiles map[string]ocicfg.Profile) [
 		byName[c.Name] = c
 	}
 	sort.Strings(names)
+	if cfg.CurrentContext != "" {
+		for i, n := range names {
+			if n == cfg.CurrentContext {
+				names = append([]string{n}, append(names[:i], names[i+1:]...)...)
+				break
+			}
+		}
+	}
 	items := make([]list.Item, 0, len(names))
 	for _, name := range names {
 		items = append(items, contextItem{Context: byName[name], fromSaved: true})
@@ -571,14 +585,16 @@ func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, pro
 	contextItems := contextsFromConfig(cfg, profiles)
 	items := make([]list.Item, 0, len(profileItems)+len(contextItems)+4)
 
-	if len(profileItems) > 0 {
-		items = append(items, profileItems...)
-	}
 	if len(contextItems) > 0 {
-		if len(profileItems) > 0 {
+		items = append(items, sectionItem{title: "CONTEXTS"})
+		items = append(items, contextItems...)
+	}
+	if len(profileItems) > 0 {
+		if len(contextItems) > 0 {
 			items = append(items, separatorItem{})
 		}
-		items = append(items, contextItems...)
+		items = append(items, sectionItem{title: "PROFILES"})
+		items = append(items, profileItems...)
 	}
 	if len(items) > 0 {
 		return items
@@ -1911,6 +1927,9 @@ func (m tuiModel) activeGridItems() []list.Item {
 		if _, sep := it.(separatorItem); sep {
 			continue
 		}
+		if _, sec := it.(sectionItem); sec {
+			continue
+		}
 		out = append(out, it)
 	}
 	return out
@@ -1922,6 +1941,9 @@ func (m tuiModel) activeGridIndexMap() []int {
 	out := make([]int, 0, len(base))
 	for i, it := range base {
 		if _, sep := it.(separatorItem); sep {
+			continue
+		}
+		if _, sec := it.(sectionItem); sec {
 			continue
 		}
 		out = append(out, i)

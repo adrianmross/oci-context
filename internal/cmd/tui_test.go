@@ -534,3 +534,34 @@ func TestProfileMenuItemsHidesLegacyEquivalentContexts(t *testing.T) {
 		t.Fatalf("expected legacy equivalent context to be hidden, got %q", got)
 	}
 }
+
+func TestProfileMenuItemsShowsContextsFirstAndCurrentFirst(t *testing.T) {
+	profiles := map[string]ocicfg.Profile{
+		"DEFAULT": {Tenancy: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"},
+	}
+	cfg := config.Config{
+		Options:        config.Options{OCIConfigPath: "/tmp/oci"},
+		CurrentContext: "B",
+		Contexts: []config.Context{
+			{Name: "A", Profile: "DEFAULT", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.compartment.oc1..a", Region: "us-phoenix-1"},
+			{Name: "B", Profile: "DEFAULT", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.compartment.oc1..b", Region: "us-phoenix-1"},
+		},
+	}
+
+	items := profileMenuItems(cfg, profiles, nil)
+	var firstContext contextItem
+	found := false
+	for _, it := range items {
+		if ci, ok := it.(contextItem); ok && ci.fromSaved {
+			firstContext = ci
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected at least one saved context in menu")
+	}
+	if firstContext.Name != "B" {
+		t.Fatalf("expected current context first, got %s", firstContext.Name)
+	}
+}
