@@ -21,7 +21,7 @@ func resetTenancyCache() {
 }
 
 func newTestContextItem() contextItem {
-	return contextItem{config.Context{
+	return contextItem{Context: config.Context{
 		Name:            "dev",
 		Profile:         "DEFAULT",
 		TenancyOCID:     "ocid1.tenancy.oc1..ten",
@@ -312,8 +312,8 @@ func TestTUIQAndCtrlSSaveEquivalentInRegions(t *testing.T) {
 }
 
 func TestTUICompartmentStagePersistsAcrossMenuSwitch(t *testing.T) {
-	ctxA := contextItem{config.Context{Name: "DEFAULT", Profile: "DEFAULT", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"}}
-	ctxB := contextItem{config.Context{Name: "SECOND", Profile: "SECOND", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.tenancy.oc1..ten", Region: "us-ashburn-1"}}
+	ctxA := contextItem{Context: config.Context{Name: "DEFAULT", Profile: "DEFAULT", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"}}
+	ctxB := contextItem{Context: config.Context{Name: "SECOND", Profile: "SECOND", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.tenancy.oc1..ten", Region: "us-ashburn-1"}}
 	cfg := config.Config{Options: config.Options{OCIConfigPath: "/tmp/oci"}, Contexts: []config.Context{ctxA.Context, ctxB.Context}}
 	m := newTuiModel(cfg, "", []list.Item{ctxA, ctxB}, map[string]ocicfg.Profile{
 		"DEFAULT": {Tenancy: ctxA.TenancyOCID, Region: ctxA.Region},
@@ -351,7 +351,7 @@ func TestTUICompartmentStagePersistsAcrossMenuSwitch(t *testing.T) {
 }
 
 func TestTUIQFromContextsUsesStagedCompartmentSelection(t *testing.T) {
-	ctx := contextItem{config.Context{Name: "DEFAULT", Profile: "DEFAULT", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"}}
+	ctx := contextItem{Context: config.Context{Name: "DEFAULT", Profile: "DEFAULT", TenancyOCID: "ocid1.tenancy.oc1..ten", CompartmentOCID: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"}}
 	cfg := config.Config{Options: config.Options{OCIConfigPath: "/tmp/oci"}, Contexts: []config.Context{ctx.Context}}
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")

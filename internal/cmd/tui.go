@@ -232,14 +232,7 @@ func newTuiCmd() *cobra.Command {
 				return err
 			}
 			profiles, perr := ocicfg.LoadProfiles(cfg.Options.OCIConfigPath)
-			items := contextsFromProfiles(profiles)
-			if perr != nil || len(items) == 0 {
-				// fallback to stored contexts if profile parsing fails or yields none
-				items = make([]list.Item, 0, len(cfg.Contexts))
-				for _, ctx := range cfg.Contexts {
-					items = append(items, contextItem{ctx})
-				}
-			}
+			items := profileMenuItems(cfg, profiles, perr)
 			startMode := ""
 			if len(args) == 1 {
 				startMode = args[0]
@@ -270,6 +263,14 @@ func toRegionList(regions []string) []list.Item {
 	}
 	return items
 }
+
+type sectionItem struct {
+	title string
+}
+
+func (s sectionItem) Title() string       { return s.title }
+func (s sectionItem) Description() string { return "" }
+func (s sectionItem) FilterValue() string { return "" }
 
 // compDelegate wraps the default delegate to color the pending selection when present.
 type compDelegate struct {
@@ -307,6 +308,8 @@ func itemTitle(item list.Item) string {
 	switch it := item.(type) {
 	case contextItem:
 		return it.Title()
+	case sectionItem:
+		return it.Title()
 	case tenancyItem:
 		return it.Title()
 	case compItem:
@@ -321,6 +324,8 @@ func itemTitle(item list.Item) string {
 func itemDescription(item list.Item) string {
 	switch it := item.(type) {
 	case contextItem:
+		return it.Description()
+	case sectionItem:
 		return it.Description()
 	case tenancyItem:
 		return it.Description()
@@ -415,6 +420,10 @@ func newContextDelegate(pendingName *string, ultraCompact bool) *contextDelegate
 }
 
 func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	if si, ok := listItem.(sectionItem); ok {
+		fmt.Fprint(w, lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true).Render(si.Title()))
+		return
+	}
 	if ci, ok := listItem.(contextItem); ok && d.pendingName != nil && *d.pendingName != "" && ci.Name == *d.pendingName {
 		origTitle := d.Styles.NormalTitle
 		origDesc := d.Styles.NormalDesc
@@ -511,7 +520,7 @@ func contextsFromProfiles(profiles map[string]ocicfg.Profile) []list.Item {
 	items := make([]list.Item, 0, len(names))
 	for _, name := range names {
 		p := profiles[name]
-		items = append(items, contextItem{config.Context{
+		items = append(items, contextItem{Context: config.Context{
 			Name:            name,
 			Profile:         name,
 			TenancyOCID:     p.Tenancy,
@@ -521,6 +530,46 @@ func contextsFromProfiles(profiles map[string]ocicfg.Profile) []list.Item {
 		}})
 	}
 	return items
+}
+
+func contextsFromConfig(cfg config.Config) []list.Item {
+	names := make([]string, 0, len(cfg.Contexts))
+	byName := make(map[string]config.Context, len(cfg.Contexts))
+	for _, c := range cfg.Contexts {
+		names = append(names, c.Name)
+		byName[c.Name] = c
+	}
+	sort.Strings(names)
+	items := make([]list.Item, 0, len(names))
+	for _, name := range names {
+		items = append(items, contextItem{Context: byName[name], fromSaved: true})
+	}
+	return items
+}
+
+func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, profilesErr error) []list.Item {
+	profileItems := contextsFromProfiles(profiles)
+	contextItems := contextsFromConfig(cfg)
+	items := make([]list.Item, 0, len(profileItems)+len(contextItems)+4)
+
+	if len(profileItems) > 0 {
+		items = append(items, sectionItem{title: "PROFILES"})
+		items = append(items, profileItems...)
+	}
+	if len(contextItems) > 0 {
+		if len(items) > 0 {
+			items = append(items, sectionItem{title: "CONTEXTS"})
+		}
+		items = append(items, contextItems...)
+	}
+	if len(items) > 0 {
+		return items
+	}
+	// Ultimate fallback if both sources are empty/unavailable.
+	if profilesErr != nil {
+		return []list.Item{}
+	}
+	return profileItems
 }
 
 // tenanciesFromProfiles groups profiles by tenancy OCID into tenancy items.
@@ -560,7 +609,7 @@ func selectProfileForTenancy(item tenancyItem, profiles map[string]ocicfg.Profil
 
 // contextItemForProfile builds a contextItem from a profile entry.
 func contextItemForProfile(name string, p ocicfg.Profile) contextItem {
-	return contextItem{config.Context{
+	return contextItem{Context: config.Context{
 		Name:            name,
 		Profile:         name,
 		TenancyOCID:     p.Tenancy,
@@ -692,10 +741,16 @@ func readChoiceZero(cmd *cobra.Command, n int) (int, error) {
 	return choice - 1, nil
 }
 
-type contextItem struct{ config.Context }
+type contextItem struct {
+	config.Context
+	fromSaved bool
+}
 
 func (c contextItem) Title() string { return c.Name }
 func (c contextItem) Description() string {
+	if c.fromSaved {
+		return fmt.Sprintf("context profile=%s region=%s", c.Profile, c.Region)
+	}
 	return fmt.Sprintf("profile=%s region=%s", c.Profile, c.Region)
 }
 func (c contextItem) FilterValue() string { return c.Name }
@@ -826,6 +881,15 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	if cfg.CurrentContext != "" {
 		for i, it := range items {
 			if ci, ok := it.(contextItem); ok && ci.Name == cfg.CurrentContext {
+				l.Select(i)
+				break
+			}
+		}
+	}
+	// If the selected row is a section header, move to the first actual context row.
+	if _, ok := l.SelectedItem().(contextItem); !ok {
+		for i, it := range items {
+			if _, ok := it.(contextItem); ok {
 				l.Select(i)
 				break
 			}
@@ -1806,7 +1870,7 @@ func (m tuiModel) isStagedItem(item list.Item) bool {
 }
 
 func (m tuiModel) renderHeader() string {
-	mode := strings.ToUpper(m.mode)
+	mode := strings.ToUpper(displayModeName(m.mode))
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		m.theme.headerTitle.Render("OCI Context"),
@@ -1821,7 +1885,7 @@ func (m tuiModel) renderTabs() string {
 		mode  string
 		label string
 	}{
-		{mode: "contexts", label: "Contexts"},
+		{mode: "contexts", label: "Profiles"},
 		{mode: "tenancies", label: "Tenancies"},
 		{mode: "compartments", label: "Compartments"},
 		{mode: "regions", label: "Regions"},
@@ -1831,7 +1895,7 @@ func (m tuiModel) renderTabs() string {
 			mode  string
 			label string
 		}{
-			{mode: "contexts", label: "Ctx"},
+			{mode: "contexts", label: "Prof"},
 			{mode: "tenancies", label: "Ten"},
 			{mode: "compartments", label: "Comp"},
 			{mode: "regions", label: "Reg"},
@@ -1912,7 +1976,14 @@ func inlineStateSummary(m tuiModel) string {
 	if m.isModeVerbose(m.mode) {
 		detail = "verbose"
 	}
-	return fmt.Sprintf("mode:%s | current:%s | layout:%s | detail:%s", m.mode, current, layout, detail)
+	return fmt.Sprintf("mode:%s | current:%s | layout:%s | detail:%s", displayModeName(m.mode), current, layout, detail)
+}
+
+func displayModeName(mode string) string {
+	if mode == "contexts" {
+		return "profiles"
+	}
+	return mode
 }
 
 func (m tuiModel) renderHelpPanel() string {
@@ -2152,9 +2223,10 @@ func parentLabel(parent string, item contextItem) string {
 // finalizeSelection sets the chosen compartment, saves config, and quits.
 func (m tuiModel) finalizeSelection() (tea.Model, tea.Cmd) {
 	m.finalized = true
-	m.selected = m.ctxItem.Name
 	// persist selection (compartment + region if set)
 	m.ctxItem.CompartmentOCID = m.parentID
+	m.maybeDeriveContextName()
+	m.selected = m.ctxItem.Name
 	// Region persisted by UpsertContext from ctxItem; regionSet already applied
 	m.cfg.CurrentContext = m.ctxItem.Name
 	if err := m.cfg.UpsertContext(m.ctxItem.Context); err != nil {
@@ -2170,6 +2242,39 @@ func (m tuiModel) finalizeSelection() (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, tea.Quit
+}
+
+func (m *tuiModel) maybeDeriveContextName() {
+	profileName := strings.TrimSpace(m.ctxItem.Profile)
+	if profileName == "" {
+		return
+	}
+	p, ok := m.profiles[profileName]
+	if !ok {
+		return
+	}
+	baseTenancy := p.Tenancy
+	baseRegion := p.Region
+	baseComp := p.Tenancy
+
+	if m.ctxItem.TenancyOCID == baseTenancy && m.ctxItem.Region == baseRegion && m.ctxItem.CompartmentOCID == baseComp {
+		if m.ctxItem.Name == "" {
+			m.ctxItem.Name = profileName
+		}
+		return
+	}
+
+	name := profileName
+	if m.ctxItem.Region != "" {
+		name += "@" + m.ctxItem.Region
+	}
+	if m.ctxItem.TenancyOCID != "" && m.ctxItem.TenancyOCID != baseTenancy {
+		name += ":" + abbreviateOCID(m.ctxItem.TenancyOCID)
+	}
+	if m.ctxItem.CompartmentOCID != "" && m.ctxItem.CompartmentOCID != m.ctxItem.TenancyOCID {
+		name += "/" + abbreviateOCID(m.ctxItem.CompartmentOCID)
+	}
+	m.ctxItem.Name = name
 }
 
 func toList(items []compItem) []list.Item {
