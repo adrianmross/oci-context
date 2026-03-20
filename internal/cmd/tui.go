@@ -594,7 +594,11 @@ func contextsFromConfig(cfg config.Config, profiles map[string]ocicfg.Profile) [
 	}
 	items := make([]list.Item, 0, len(names))
 	for _, name := range names {
-		items = append(items, contextItem{Context: byName[name], fromSaved: true})
+		items = append(items, contextItem{
+			Context:   byName[name],
+			fromSaved: true,
+			isCurrent: name == cfg.CurrentContext,
+		})
 	}
 	return items
 }
@@ -834,9 +838,15 @@ func readChoiceZero(cmd *cobra.Command, n int) (int, error) {
 type contextItem struct {
 	config.Context
 	fromSaved bool
+	isCurrent bool
 }
 
-func (c contextItem) Title() string { return c.Name }
+func (c contextItem) Title() string {
+	if c.isCurrent {
+		return c.Name + " @CURRENT"
+	}
+	return c.Name
+}
 func (c contextItem) Description() string {
 	if c.fromSaved {
 		return fmt.Sprintf("context profile=%s region=%s", c.Profile, c.Region)
