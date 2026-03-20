@@ -444,9 +444,10 @@ func newAuthCmd() *cobra.Command {
 		},
 	})
 
-	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
-	cmd.Flags().BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
-	cmd.Flags().StringVar(&targetContext, "context", "", "Target context name (default current)")
+	pf := cmd.PersistentFlags()
+	pf.StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	pf.BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
+	pf.StringVar(&targetContext, "context", "", "Target context name (default current)")
 	_ = useGlobal // bound/read through resolvePath via flags
 	return cmd
 }
