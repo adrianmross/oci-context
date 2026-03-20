@@ -81,6 +81,7 @@ Requests: `{ "method": "get_current" }`, `{ "method": "use_context", "name": "de
 Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`. Watch streams events.
 
 ## CLI commands
+- `oci-context --version` or `oci-context -v` (prints build version metadata)
 - `oci-context init`
 - `oci-context list`
 - `oci-context current`

@@ -66,8 +66,11 @@ jobs:
               ext=".exe"
             fi
 
-            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "-s -w" -o "dist/oci-context-${label}-${target_os}-${target_arch}${ext}" ./cmd/oci-context
-            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "-s -w" -o "dist/oci-contextd-${label}-${target_os}-${target_arch}${ext}" ./cmd/oci-contextd
+            build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            ldflags="-s -w -X github.com/adrianmross/oci-context/internal/cmd.version=${label} -X github.com/adrianmross/oci-context/internal/cmd.commit=${short_sha} -X github.com/adrianmross/oci-context/internal/cmd.date=${build_date}"
+
+            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "$ldflags" -o "dist/oci-context-${label}-${target_os}-${target_arch}${ext}" ./cmd/oci-context
+            GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags "$ldflags" -o "dist/oci-contextd-${label}-${target_os}-${target_arch}${ext}" ./cmd/oci-contextd
           done
 
           (cd dist && shasum -a 256 ./* > "checksums-${label}.txt")
