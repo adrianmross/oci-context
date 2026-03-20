@@ -425,19 +425,11 @@ func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 	if ci, ok := listItem.(compItem); ok && d.pendingID != nil && *d.pendingID != "" && ci.oc.ID == *d.pendingID {
 		origNormalTitle := d.Styles.NormalTitle
 		origNormalDesc := d.Styles.NormalDesc
-		origTitle := d.Styles.SelectedTitle
-		origDesc := d.Styles.SelectedDesc
-		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
-		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
-		d.Styles.NormalTitle = pendingTitle
-		d.Styles.NormalDesc = pendingDesc
-		d.Styles.SelectedTitle = pendingTitle
-		d.Styles.SelectedDesc = pendingDesc
+		d.Styles.NormalTitle = origNormalTitle.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalDesc = origNormalDesc.Foreground(stagedColor).Bold(true)
 		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origNormalTitle
 		d.Styles.NormalDesc = origNormalDesc
-		d.Styles.SelectedTitle = origTitle
-		d.Styles.SelectedDesc = origDesc
 		return
 	}
 	if ci, ok := listItem.(compItem); ok && d.currentID != nil && *d.currentID != "" && ci.oc.ID == *d.currentID {
@@ -506,19 +498,11 @@ func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 	if ci, ok := listItem.(contextItem); ok && d.pendingName != nil && *d.pendingName != "" && ci.Name == *d.pendingName {
 		origTitle := d.Styles.NormalTitle
 		origDesc := d.Styles.NormalDesc
-		origSelectedTitle := d.Styles.SelectedTitle
-		origSelectedDesc := d.Styles.SelectedDesc
-		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
-		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
-		d.Styles.NormalTitle = pendingTitle
-		d.Styles.NormalDesc = pendingDesc
-		d.Styles.SelectedTitle = pendingTitle
-		d.Styles.SelectedDesc = pendingDesc
+		d.Styles.NormalTitle = origTitle.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalDesc = origDesc.Foreground(stagedColor).Bold(true)
 		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origTitle
 		d.Styles.NormalDesc = origDesc
-		d.Styles.SelectedTitle = origSelectedTitle
-		d.Styles.SelectedDesc = origSelectedDesc
 		return
 	}
 	if ci, ok := listItem.(contextItem); ok && d.currentName != nil && *d.currentName != "" && ci.Name == *d.currentName {
@@ -558,19 +542,11 @@ func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 	if ti, ok := listItem.(tenancyItem); ok && d.pendingOCID != nil && *d.pendingOCID != "" && ti.TenancyOCID == *d.pendingOCID {
 		origTitle := d.Styles.NormalTitle
 		origDesc := d.Styles.NormalDesc
-		origSelectedTitle := d.Styles.SelectedTitle
-		origSelectedDesc := d.Styles.SelectedDesc
-		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
-		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
-		d.Styles.NormalTitle = pendingTitle
-		d.Styles.NormalDesc = pendingDesc
-		d.Styles.SelectedTitle = pendingTitle
-		d.Styles.SelectedDesc = pendingDesc
+		d.Styles.NormalTitle = origTitle.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalDesc = origDesc.Foreground(stagedColor).Bold(true)
 		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origTitle
 		d.Styles.NormalDesc = origDesc
-		d.Styles.SelectedTitle = origSelectedTitle
-		d.Styles.SelectedDesc = origSelectedDesc
 		return
 	}
 	if ti, ok := listItem.(tenancyItem); ok && d.currentOCID != nil && *d.currentOCID != "" && ti.TenancyOCID == *d.currentOCID {
@@ -602,19 +578,11 @@ func (d *regionDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 	if ri, ok := listItem.(regionItem); ok && d.pendingName != nil && *d.pendingName != "" && ri.name == *d.pendingName {
 		origNormalTitle := d.Styles.NormalTitle
 		origNormalDesc := d.Styles.NormalDesc
-		origTitle := d.Styles.SelectedTitle
-		origDesc := d.Styles.SelectedDesc
-		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
-		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
-		d.Styles.NormalTitle = pendingTitle
-		d.Styles.NormalDesc = pendingDesc
-		d.Styles.SelectedTitle = pendingTitle
-		d.Styles.SelectedDesc = pendingDesc
+		d.Styles.NormalTitle = origNormalTitle.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalDesc = origNormalDesc.Foreground(stagedColor).Bold(true)
 		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origNormalTitle
 		d.Styles.NormalDesc = origNormalDesc
-		d.Styles.SelectedTitle = origTitle
-		d.Styles.SelectedDesc = origDesc
 		return
 	}
 	if ri, ok := listItem.(regionItem); ok && d.currentName != nil && *d.currentName != "" && ri.name == *d.currentName {
