@@ -88,6 +88,28 @@ func runOCI(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func buildAuthValidateOCIArgs(ctx config.Context, ociConfigPath string) []string {
+	method := config.NormalizeAuthMethod(ctx.AuthMethod)
+	args := []string{
+		"iam", "region-subscription", "list",
+		"--tenancy-id", ctx.TenancyOCID,
+		"--output", "json",
+	}
+	if ociConfigPath != "" {
+		args = append(args, "--config-file", ociConfigPath)
+	}
+	if ctx.Profile != "" {
+		args = append(args, "--profile", ctx.Profile)
+	}
+	if method != "" {
+		args = append(args, "--auth", method)
+	}
+	if ctx.Region != "" {
+		args = append(args, "--region", ctx.Region)
+	}
+	return args
+}
+
 func newAuthCmd() *cobra.Command {
 	var cfgPath string
 	var useGlobal bool
@@ -296,14 +318,7 @@ func newAuthCmd() *cobra.Command {
 				return err
 			}
 			method := config.NormalizeAuthMethod(ctx.AuthMethod)
-			ociArgs := buildOCIArgs([]string{
-				"iam", "region-subscription", "list",
-				"--tenancy-id", ctx.TenancyOCID,
-				"--output", "json",
-			}, ctx, cfg.Options.OCIConfigPath)
-			if !hasOCIFlag(ociArgs, "--auth", "") {
-				ociArgs = append(ociArgs, "--auth", method)
-			}
+			ociArgs := buildAuthValidateOCIArgs(ctx, cfg.Options.OCIConfigPath)
 			if err := runOCI(cmd, ociArgs); err != nil {
 				return fmt.Errorf("auth validate failed for method %s: %w", method, err)
 			}
