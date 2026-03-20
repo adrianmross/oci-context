@@ -273,18 +273,20 @@ type compDelegate struct {
 }
 
 type markedItem struct {
-	base  list.Item
-	title string
+	base        list.Item
+	title       string
+	description string
 }
 
 func (m markedItem) Title() string       { return m.title }
-func (m markedItem) Description() string { return "" }
+func (m markedItem) Description() string { return m.description }
 func (m markedItem) FilterValue() string { return m.base.FilterValue() }
 
 func withStageMarker(item list.Item, ultraCompact bool) list.Item {
 	title := itemTitle(item)
+	description := itemDescription(item)
 	if ultraCompact {
-		return markedItem{base: item, title: "[*] " + title}
+		return markedItem{base: item, title: "[*] " + title, description: description}
 	}
 	badge := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("230")).
@@ -292,7 +294,7 @@ func withStageMarker(item list.Item, ultraCompact bool) list.Item {
 		Bold(true).
 		Padding(0, 1).
 		Render("STAGED")
-	return markedItem{base: item, title: fmt.Sprintf("%s  %s", title, badge)}
+	return markedItem{base: item, title: fmt.Sprintf("%s  %s", title, badge), description: description}
 }
 
 func itemTitle(item list.Item) string {
@@ -307,6 +309,21 @@ func itemTitle(item list.Item) string {
 		return it.Title()
 	default:
 		return item.FilterValue()
+	}
+}
+
+func itemDescription(item list.Item) string {
+	switch it := item.(type) {
+	case contextItem:
+		return it.Description()
+	case tenancyItem:
+		return it.Description()
+	case compItem:
+		return it.Description()
+	case regionItem:
+		return it.Description()
+	default:
+		return ""
 	}
 }
 
