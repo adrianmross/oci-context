@@ -51,6 +51,9 @@ type tuiTheme struct {
 	statusMuted  lipgloss.Style
 	ultraBadge   lipgloss.Style
 	metaBar      lipgloss.Style
+	gridCell     lipgloss.Style
+	gridSelected lipgloss.Style
+	gridStaged   lipgloss.Style
 }
 
 func newTUITheme() tuiTheme {
@@ -98,6 +101,16 @@ func newTUITheme() tuiTheme {
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(panelColor).
 			Padding(0, 1),
+		gridCell: lipgloss.NewStyle().
+			Padding(0, 1),
+		gridSelected: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("230")).
+			Background(activeTabColor).
+			Bold(true).
+			Padding(0, 1),
+		gridStaged: lipgloss.NewStyle().
+			Foreground(stagedColor).
+			Bold(true),
 	}
 }
 
@@ -1010,6 +1023,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.resizeListsForViewport()
 	case tea.KeyMsg:
+		// In wide mode, navigate active list as a grid with arrows or vim keys.
+		if m.shouldUseGridLayout() && m.moveActiveSelectionGrid(msg.String()) {
+			return m, nil
+		}
+
 		// If currently filtering, route all keys except Enter through the active list to avoid triggering hotkeys.
 		if m.mode == "contexts" && m.list.FilterState() == list.Filtering && msg.String() != "enter" {
 			m.list, cmd = m.list.Update(msg)
@@ -1529,6 +1547,9 @@ func (m tuiModel) renderStatusLine() string {
 }
 
 func (m tuiModel) activeListView() string {
+	if m.shouldUseGridLayout() {
+		return m.renderActiveGrid()
+	}
 	switch m.mode {
 	case "contexts":
 		return m.list.View()
@@ -1539,6 +1560,165 @@ func (m tuiModel) activeListView() string {
 	default:
 		return m.comps.View()
 	}
+}
+
+func (m tuiModel) activeListModel() list.Model {
+	switch m.mode {
+	case "contexts":
+		return m.list
+	case "tenancies":
+		return m.tenancies
+	case "regions":
+		return m.regions
+	default:
+		return m.comps
+	}
+}
+
+func (m *tuiModel) setActiveListModel(l list.Model) {
+	switch m.mode {
+	case "contexts":
+		m.list = l
+	case "tenancies":
+		m.tenancies = l
+	case "regions":
+		m.regions = l
+	default:
+		m.comps = l
+	}
+}
+
+func (m tuiModel) isFilteringActive() bool {
+	switch m.mode {
+	case "contexts":
+		return m.list.FilterState() == list.Filtering
+	case "tenancies":
+		return m.tenancies.FilterState() == list.Filtering
+	case "regions":
+		return m.regions.FilterState() == list.Filtering
+	default:
+		return m.comps.FilterState() == list.Filtering
+	}
+}
+
+func (m tuiModel) shouldUseGridLayout() bool {
+	if m.ultraCompact || m.helpVisible || m.width < 120 || m.isFilteringActive() {
+		return false
+	}
+	return len(m.activeListModel().Items()) > 0
+}
+
+func (m tuiModel) gridColumnsForCount(count int) int {
+	if count <= 0 {
+		return 1
+	}
+	colWidth := 32
+	cols := m.width / colWidth
+	if cols < 2 {
+		cols = 2
+	}
+	if cols > 4 {
+		cols = 4
+	}
+	if cols > count {
+		cols = count
+	}
+	return cols
+}
+
+func (m *tuiModel) moveActiveSelectionGrid(key string) bool {
+	var delta int
+	switch key {
+	case "left", "h":
+		delta = -1
+	case "right", "l":
+		delta = 1
+	case "up", "k":
+		delta = -m.gridColumnsForCount(len(m.activeListModel().Items()))
+	case "down", "j":
+		delta = m.gridColumnsForCount(len(m.activeListModel().Items()))
+	default:
+		return false
+	}
+
+	l := m.activeListModel()
+	items := l.Items()
+	if len(items) == 0 {
+		return false
+	}
+	cur := l.Index()
+	next := cur + delta
+	if next < 0 || next >= len(items) {
+		return true
+	}
+	l.Select(next)
+	m.setActiveListModel(l)
+	return true
+}
+
+func (m tuiModel) renderActiveGrid() string {
+	l := m.activeListModel()
+	items := l.Items()
+	if len(items) == 0 {
+		return ""
+	}
+
+	cols := m.gridColumnsForCount(len(items))
+	cellW := (m.width - 8) / cols
+	if cellW < 18 {
+		cellW = 18
+	}
+
+	lines := make([]string, 0, (len(items)+cols-1)/cols)
+	for i := 0; i < len(items); i += cols {
+		cells := make([]string, 0, cols)
+		for c := 0; c < cols; c++ {
+			idx := i + c
+			if idx >= len(items) {
+				cells = append(cells, lipgloss.NewStyle().Width(cellW).Render(""))
+				continue
+			}
+
+			title := itemTitle(items[idx])
+			staged := m.isStagedItem(items[idx])
+			if staged {
+				if m.ultraCompact {
+					title = "[*] " + title
+				} else {
+					title = title + " " + m.theme.gridStaged.Render("●")
+				}
+			}
+			if idx == l.Index() {
+				cells = append(cells, m.theme.gridSelected.Width(cellW).Render(title))
+			} else {
+				cells = append(cells, m.theme.gridCell.Width(cellW).Render(title))
+			}
+		}
+		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, cells...))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) isStagedItem(item list.Item) bool {
+	switch m.mode {
+	case "contexts":
+		if ci, ok := item.(contextItem); ok {
+			return m.pendingContextName != "" && ci.Name == m.pendingContextName
+		}
+	case "tenancies":
+		if ti, ok := item.(tenancyItem); ok {
+			return m.pendingTenancyOCID != "" && ti.TenancyOCID == m.pendingTenancyOCID
+		}
+	case "regions":
+		if ri, ok := item.(regionItem); ok {
+			return m.pendingRegion != "" && ri.name == m.pendingRegion
+		}
+	default:
+		if ci, ok := item.(compItem); ok {
+			return m.pendingSelectionID != "" && ci.oc.ID == m.pendingSelectionID
+		}
+	}
+	return false
 }
 
 func (m tuiModel) renderHeader() string {
