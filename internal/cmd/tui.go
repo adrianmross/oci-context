@@ -611,6 +611,7 @@ func contextsFromProfiles(profiles map[string]ocicfg.Profile, current config.Con
 		ci := contextItem{Context: config.Context{
 			Name:            name,
 			Profile:         name,
+			AuthMethod:      config.AuthMethodAPIKey,
 			TenancyOCID:     p.Tenancy,
 			CompartmentOCID: p.Tenancy,
 			Region:          p.Region,
@@ -629,6 +630,8 @@ func contextsFromConfig(cfg config.Config, profiles map[string]ocicfg.Profile) [
 	byName := make(map[string]config.Context, len(cfg.Contexts))
 	seenBySignature := make(map[string]string) // signature -> kept context name
 	for _, c := range cfg.Contexts {
+		c.AuthMethod = config.NormalizeAuthMethod(c.AuthMethod)
+		c.User = strings.TrimSpace(c.User)
 		if isContextEquivalentToProfile(c, profiles) {
 			// Hide contexts that are effectively identical to an OCI profile baseline.
 			continue
@@ -680,6 +683,8 @@ func contextSignature(c config.Context) string {
 		c.TenancyOCID,
 		c.CompartmentOCID,
 		c.Region,
+		config.NormalizeAuthMethod(c.AuthMethod),
+		strings.TrimSpace(c.User),
 	}, "|")
 }
 
@@ -847,11 +852,48 @@ func contextItemForProfile(name string, p ocicfg.Profile) contextItem {
 	return contextItem{Context: config.Context{
 		Name:            name,
 		Profile:         name,
+		AuthMethod:      config.AuthMethodAPIKey,
 		TenancyOCID:     p.Tenancy,
 		CompartmentOCID: p.Tenancy,
 		Region:          p.Region,
 		User:            p.User,
 	}}
+}
+
+func toAuthMethodList() []list.Item {
+	methods := config.ValidAuthMethods()
+	items := make([]list.Item, 0, len(methods))
+	for _, method := range methods {
+		items = append(items, authMethodItem{method: method})
+	}
+	return items
+}
+
+func usersFromProfilesAndContexts(cfg config.Config, profiles map[string]ocicfg.Profile) []list.Item {
+	seen := map[string]bool{}
+	users := make([]string, 0, len(profiles)+len(cfg.Contexts))
+	for _, p := range profiles {
+		u := strings.TrimSpace(p.User)
+		if u == "" || seen[u] {
+			continue
+		}
+		seen[u] = true
+		users = append(users, u)
+	}
+	for _, c := range cfg.Contexts {
+		u := strings.TrimSpace(c.User)
+		if u == "" || seen[u] {
+			continue
+		}
+		seen[u] = true
+		users = append(users, u)
+	}
+	sort.Strings(users)
+	items := make([]list.Item, 0, len(users))
+	for _, u := range users {
+		items = append(items, userItem{user: u})
+	}
+	return items
 }
 
 // isTerminal checks if stdout is a TTY.
@@ -1044,6 +1086,22 @@ func (r regionItem) Title() string       { return r.name }
 func (r regionItem) Description() string { return r.name }
 func (r regionItem) FilterValue() string { return r.name }
 
+type authMethodItem struct {
+	method string
+}
+
+func (a authMethodItem) Title() string       { return a.method }
+func (a authMethodItem) Description() string { return "OCI auth method" }
+func (a authMethodItem) FilterValue() string { return a.method }
+
+type userItem struct {
+	user string
+}
+
+func (u userItem) Title() string       { return u.user }
+func (u userItem) Description() string { return "OCI user hint/OCID" }
+func (u userItem) FilterValue() string { return u.user }
+
 func asCompItem(item list.Item) (compItem, bool) {
 	switch it := item.(type) {
 	case compItem:
@@ -1059,6 +1117,8 @@ func asCompItem(item list.Item) (compItem, bool) {
 type tuiModel struct {
 	list               list.Model
 	tenancies          list.Model
+	authMethods        list.Model
+	users              list.Model
 	cfg                config.Config
 	cfgPath            string
 	selected           string
@@ -1083,11 +1143,15 @@ type tuiModel struct {
 	pendingRegion      string              // region pending name
 	pendingContextName string              // context pending name
 	pendingTenancyOCID string              // tenancy pending OCID
+	pendingAuthMethod  string              // auth method pending value
+	pendingUser        string              // user pending value
 	autoStagedTenancy  bool                // true when tenancy was auto-staged from compartment stage
 	savedContextName   string              // context currently persisted on disk
 	savedTenancyOCID   string              // tenancy currently persisted on disk
 	savedCompartmentID string              // compartment currently persisted on disk
 	savedRegion        string              // region currently persisted on disk
+	savedAuthMethod    string              // auth method currently persisted on disk
+	savedUser          string              // user currently persisted on disk
 	ultraCompact       bool                // minimal chrome mode
 	helpVisible        bool                // keybindings panel toggle
 	initCmd            tea.Cmd             // optional startup command for shortcut modes
@@ -1180,9 +1244,27 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	rl.SetShowTitle(false)
 	rl.SetShowHelp(false)
 	rl.SetShowStatusBar(false)
+	al := list.New(toAuthMethodList(), list.NewDefaultDelegate(), defaultWidth, defaultHeight)
+	al.Title = "Select auth method"
+	al.SetFilteringEnabled(true)
+	al.FilterInput.Placeholder = filterPlaceholderHint
+	al.SetShowFilter(false)
+	al.SetShowTitle(false)
+	al.SetShowHelp(false)
+	al.SetShowStatusBar(false)
+	ul := list.New(usersFromProfilesAndContexts(cfg, profiles), list.NewDefaultDelegate(), defaultWidth, defaultHeight)
+	ul.Title = "Select user"
+	ul.SetFilteringEnabled(true)
+	ul.FilterInput.Placeholder = filterPlaceholderHint
+	ul.SetShowFilter(false)
+	ul.SetShowTitle(false)
+	ul.SetShowHelp(false)
+	ul.SetShowStatusBar(false)
 	m := tuiModel{
 		list:        l,
 		tenancies:   tn,
+		authMethods: al,
+		users:       ul,
 		cfg:         cfg,
 		cfgPath:     cfgPath,
 		mode:        "contexts",
@@ -1207,6 +1289,8 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 			m.savedCompartmentID = current.TenancyOCID
 		}
 		m.savedRegion = current.Region
+		m.savedAuthMethod = config.NormalizeAuthMethod(current.AuthMethod)
+		m.savedUser = current.User
 	}
 	for _, it := range items {
 		if _, ok := it.(sectionItem); ok {
@@ -1269,6 +1353,8 @@ func (m *tuiModel) resizeListsForViewport() {
 	m.tenancies.SetSize(panelInnerWidth, panelInnerHeight)
 	m.comps.SetSize(panelInnerWidth, panelInnerHeight)
 	m.regions.SetSize(panelInnerWidth, panelInnerHeight)
+	m.authMethods.SetSize(panelInnerWidth, panelInnerHeight)
+	m.users.SetSize(panelInnerWidth, panelInnerHeight)
 }
 
 func (m *tuiModel) refreshDelegates() {
@@ -1285,6 +1371,8 @@ func (m *tuiModel) applyDensityMode() {
 	m.tenancies.Title = ""
 	m.comps.Title = ""
 	m.regions.Title = ""
+	m.authMethods.Title = ""
+	m.users.Title = ""
 }
 
 // selectInitialContext picks the current context if present, else the first context item.
@@ -1442,13 +1530,49 @@ func (m tuiModel) switchToMenu(target string) (tuiModel, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		return m, m.loadRegionsCmd(m.ctxItem), true
+	case "auth":
+		var ok bool
+		m, ok = m.ensureActiveContext()
+		if !ok {
+			return m, nil, false
+		}
+		currentMethod := config.NormalizeAuthMethod(m.ctxItem.AuthMethod)
+		m.ctxItem.AuthMethod = currentMethod
+		for i, it := range m.authMethods.Items() {
+			ai, ok := it.(authMethodItem)
+			if ok && ai.method == currentMethod {
+				m.authMethods.Select(i)
+				break
+			}
+		}
+		m.mode = "auth"
+		m.status = "Select auth method (Space to stage, Ctrl+S to save)"
+		return m, nil, true
+	case "users":
+		var ok bool
+		m, ok = m.ensureActiveContext()
+		if !ok {
+			return m, nil, false
+		}
+		currentUser := strings.TrimSpace(m.ctxItem.User)
+		m.ctxItem.User = currentUser
+		for i, it := range m.users.Items() {
+			ui, ok := it.(userItem)
+			if ok && ui.user == currentUser {
+				m.users.Select(i)
+				break
+			}
+		}
+		m.mode = "users"
+		m.status = "Select user (Space to stage, Ctrl+S to save)"
+		return m, nil, true
 	default:
 		return m, nil, false
 	}
 }
 
 func (m tuiModel) cycleMenu(forward bool) (tea.Model, tea.Cmd) {
-	order := []string{"contexts", "tenancies", "compartments", "regions"}
+	order := []string{"contexts", "tenancies", "compartments", "regions", "auth", "users"}
 	cur := 0
 	for i, mode := range order {
 		if mode == m.mode {
@@ -1598,6 +1722,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.status = fmt.Sprintf("Region set to %s (not saved until finalize)", item.name)
 					return m, nil
 				}
+			} else if m.mode == "auth" {
+				if item, ok := m.authMethods.SelectedItem().(authMethodItem); ok {
+					m.ctxItem.AuthMethod = item.method
+					m.pendingAuthMethod = item.method
+					m.mode = "contexts"
+					m.status = fmt.Sprintf("Auth method set to %s (pending save)", item.method)
+					return m, nil
+				}
+			} else if m.mode == "users" {
+				if item, ok := m.users.SelectedItem().(userItem); ok {
+					m.ctxItem.User = item.user
+					m.pendingUser = item.user
+					m.mode = "contexts"
+					m.status = fmt.Sprintf("User set to %s (pending save)", item.user)
+					return m, nil
+				}
 			}
 		case " ":
 			// Space acts per mode: mark pending selection with highlight and allow quick save.
@@ -1685,6 +1825,32 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if m.mode == "auth" {
+				if item, ok := m.authMethods.SelectedItem().(authMethodItem); ok {
+					if m.pendingAuthMethod == item.method {
+						m.pendingAuthMethod = ""
+						m.status = fmt.Sprintf("Auth method %s unstaged", item.method)
+						return m, nil
+					}
+					m.pendingAuthMethod = item.method
+					m.ctxItem.AuthMethod = item.method
+					m.status = fmt.Sprintf("Auth method set to %s (pending save)", item.method)
+				}
+				return m, nil
+			}
+			if m.mode == "users" {
+				if item, ok := m.users.SelectedItem().(userItem); ok {
+					if m.pendingUser == item.user {
+						m.pendingUser = ""
+						m.status = fmt.Sprintf("User %s unstaged", item.user)
+						return m, nil
+					}
+					m.pendingUser = item.user
+					m.ctxItem.User = item.user
+					m.status = fmt.Sprintf("User set to %s (pending save)", item.user)
+				}
+				return m, nil
+			}
 			return m, nil
 		case "ctrl+s":
 			return m.saveAndQuitCurrentMode()
@@ -1724,6 +1890,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = ""
 				return m, nil
 			}
+			if m.mode == "auth" && m.authMethods.FilterState() != list.Filtering {
+				m.mode = "contexts"
+				m.status = ""
+				return m, nil
+			}
+			if m.mode == "users" && m.users.FilterState() != list.Filtering {
+				m.mode = "contexts"
+				m.status = ""
+				return m, nil
+			}
 		case "r":
 			if m.mode == "contexts" {
 				// open region picker for highlighted context
@@ -1739,6 +1915,38 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, m.loadRegionsCmd(item)
 				}
+			}
+		case "a":
+			if m.mode == "contexts" {
+				if nm, cmd, ok := m.switchToMenu("auth"); ok {
+					return nm, cmd
+				}
+				m.status = "Select a profile first"
+				return m, nil
+			}
+		case "A":
+			if m.mode != "contexts" {
+				if nm, cmd, ok := m.switchToMenu("auth"); ok {
+					return nm, cmd
+				}
+				m.status = "Select a profile first"
+				return m, nil
+			}
+		case "u":
+			if m.mode == "contexts" {
+				if nm, cmd, ok := m.switchToMenu("users"); ok {
+					return nm, cmd
+				}
+				m.status = "Select a profile first"
+				return m, nil
+			}
+		case "U":
+			if m.mode != "contexts" {
+				if nm, cmd, ok := m.switchToMenu("users"); ok {
+					return nm, cmd
+				}
+				m.status = "Select a profile first"
+				return m, nil
 			}
 		case "R":
 			// Regions picker from any submenu using uppercase
@@ -1863,6 +2071,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.regions.SetFilterState(list.Filtering)
 				m.regions.SetShowFilter(true)
 			}
+			if m.mode == "auth" {
+				m.authMethods.SetFilteringEnabled(true)
+				m.authMethods.SetFilterText("")
+				m.authMethods.SetFilterState(list.Filtering)
+				m.authMethods.SetShowFilter(true)
+			}
+			if m.mode == "users" {
+				m.users.SetFilteringEnabled(true)
+				m.users.SetFilterText("")
+				m.users.SetFilterState(list.Filtering)
+				m.users.SetShowFilter(true)
+			}
 			return m, nil
 		case "?":
 			m.helpVisible = !m.helpVisible
@@ -1966,7 +2186,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.comps, cmd = m.comps.Update(msg)
 		return m, cmd
 	}
-	m.regions, cmd = m.regions.Update(msg)
+	if m.mode == "regions" {
+		m.regions, cmd = m.regions.Update(msg)
+		return m, cmd
+	}
+	if m.mode == "auth" {
+		m.authMethods, cmd = m.authMethods.Update(msg)
+		return m, cmd
+	}
+	m.users, cmd = m.users.Update(msg)
 	return m, cmd
 }
 
@@ -2061,6 +2289,22 @@ func (m tuiModel) activeListView() string {
 			l.SetShowFilter(true)
 		}
 		return l.View()
+	case "auth":
+		l := m.authMethods
+		if l.FilterState() == list.Unfiltered {
+			l.SetShowFilter(false)
+		} else {
+			l.SetShowFilter(true)
+		}
+		return l.View()
+	case "users":
+		l := m.users
+		if l.FilterState() == list.Unfiltered {
+			l.SetShowFilter(false)
+		} else {
+			l.SetShowFilter(true)
+		}
+		return l.View()
 	default:
 		l := m.comps
 		if l.FilterState() == list.Unfiltered {
@@ -2080,6 +2324,10 @@ func (m tuiModel) activeListModel() list.Model {
 		return m.tenancies
 	case "regions":
 		return m.regions
+	case "auth":
+		return m.authMethods
+	case "users":
+		return m.users
 	default:
 		return m.comps
 	}
@@ -2093,6 +2341,10 @@ func (m tuiModel) activeListFilterState() list.FilterState {
 		return m.tenancies.FilterState()
 	case "regions":
 		return m.regions.FilterState()
+	case "auth":
+		return m.authMethods.FilterState()
+	case "users":
+		return m.users.FilterState()
 	default:
 		return m.comps.FilterState()
 	}
@@ -2130,6 +2382,10 @@ func (m *tuiModel) setActiveListModel(l list.Model) {
 		m.tenancies = l
 	case "regions":
 		m.regions = l
+	case "auth":
+		m.authMethods = l
+	case "users":
+		m.users = l
 	default:
 		m.comps = l
 	}
@@ -2190,6 +2446,10 @@ func (m tuiModel) isFilteringActive() bool {
 		return m.tenancies.FilterState() != list.Unfiltered
 	case "regions":
 		return m.regions.FilterState() != list.Unfiltered
+	case "auth":
+		return m.authMethods.FilterState() != list.Unfiltered
+	case "users":
+		return m.users.FilterState() != list.Unfiltered
 	default:
 		return m.comps.FilterState() != list.Unfiltered
 	}
@@ -2198,6 +2458,8 @@ func (m tuiModel) isFilteringActive() bool {
 func (m tuiModel) isModeVerbose(mode string) bool {
 	switch mode {
 	case "contexts":
+		return m.prefs.VerboseContexts
+	case "auth", "users":
 		return m.prefs.VerboseContexts
 	case "tenancies":
 		return m.prefs.VerboseTenancies
@@ -2211,6 +2473,8 @@ func (m tuiModel) isModeVerbose(mode string) bool {
 func (m *tuiModel) setModeVerbose(mode string, v bool) {
 	switch mode {
 	case "contexts":
+		m.prefs.VerboseContexts = v
+	case "auth", "users":
 		m.prefs.VerboseContexts = v
 	case "tenancies":
 		m.prefs.VerboseTenancies = v
@@ -2465,6 +2729,14 @@ func (m tuiModel) isStagedItem(item list.Item) bool {
 		if ri, ok := item.(regionItem); ok {
 			return m.pendingRegion != "" && ri.name == m.pendingRegion
 		}
+	case "auth":
+		if ai, ok := item.(authMethodItem); ok {
+			return m.pendingAuthMethod != "" && ai.method == m.pendingAuthMethod
+		}
+	case "users":
+		if ui, ok := item.(userItem); ok {
+			return m.pendingUser != "" && ui.user == m.pendingUser
+		}
 	default:
 		if ci, ok := item.(compItem); ok {
 			return m.pendingSelectionID != "" && ci.oc.ID == m.pendingSelectionID
@@ -2486,6 +2758,14 @@ func (m tuiModel) isCurrentSavedItem(item list.Item) bool {
 	case "regions":
 		if ri, ok := item.(regionItem); ok {
 			return m.savedRegion != "" && ri.name == m.savedRegion
+		}
+	case "auth":
+		if ai, ok := item.(authMethodItem); ok {
+			return m.savedAuthMethod != "" && ai.method == m.savedAuthMethod
+		}
+	case "users":
+		if ui, ok := item.(userItem); ok {
+			return m.savedUser != "" && ui.user == m.savedUser
 		}
 	default:
 		if ci, ok := item.(compItem); ok {
@@ -2515,6 +2795,8 @@ func (m tuiModel) renderTabs() string {
 		{mode: "tenancies", label: "Tenancies"},
 		{mode: "compartments", label: "Compartments"},
 		{mode: "regions", label: "Regions"},
+		{mode: "auth", label: "Auth"},
+		{mode: "users", label: "Users"},
 	}
 	if compact {
 		labels = []struct {
@@ -2525,6 +2807,8 @@ func (m tuiModel) renderTabs() string {
 			{mode: "tenancies", label: "Ten"},
 			{mode: "compartments", label: "Comp"},
 			{mode: "regions", label: "Reg"},
+			{mode: "auth", label: "Auth"},
+			{mode: "users", label: "User"},
 		}
 	}
 
@@ -2551,6 +2835,10 @@ func (m tuiModel) isModeStaged(mode string) bool {
 		return m.pendingTenancyOCID != ""
 	case "regions":
 		return m.pendingRegion != ""
+	case "auth":
+		return m.pendingAuthMethod != ""
+	case "users":
+		return m.pendingUser != ""
 	default:
 		return m.pendingSelectionID != ""
 	}
@@ -2604,9 +2892,9 @@ func (m tuiModel) shouldInlineHotkeys() bool {
 
 func primaryHotkeys(compact bool) string {
 	if compact {
-		return "enter/backspace drill/up • space stage • / filter • v verbose • m matrix • q save • ? help"
+		return "enter/backspace drill/up • space stage • / filter • a auth • u user • v verbose • m matrix • q save • ? help"
 	}
-	return "enter/backspace drill/up • space stage • / filter • v verbose • m matrix • q save • ? help"
+	return "enter/backspace drill/up • space stage • / filter • a auth • u user • v verbose • m matrix • q save • ? help"
 }
 
 func inlineStateSummary(m tuiModel) string {
@@ -2649,13 +2937,13 @@ func (m tuiModel) renderHelpPanel() string {
 		"?: toggle this help panel",
 		"",
 		"Mode Navigation",
-		"profiles: r regions • c compartments • t tenancies",
-		"submenus: R regions • C compartments • T tenancies • P profiles",
+		"profiles: r regions • c compartments • t tenancies • a auth • u users",
+		"submenus: R regions • C compartments • T tenancies • A auth • U users • P profiles",
 	}
 	if m.width > 0 && m.width < 72 {
 		lines = []string{
 			"Keys: enter drill, space stage, q save, esc quit, / filter, ? help",
-			"Switch: r/c/t in profiles, R/C/T/P in submenus",
+			"Switch: r/c/t/a/u in profiles, R/C/T/A/U/P in submenus",
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -2675,6 +2963,12 @@ func compactMetaNarrow(m tuiModel) string {
 	if m.pendingRegion != "" {
 		staged = "reg:" + m.pendingRegion
 	}
+	if m.pendingAuthMethod != "" {
+		staged = "auth:" + m.pendingAuthMethod
+	}
+	if m.pendingUser != "" {
+		staged = "usr:" + m.pendingUser
+	}
 	filter := "off"
 	switch m.mode {
 	case "contexts":
@@ -2691,6 +2985,14 @@ func compactMetaNarrow(m tuiModel) string {
 		}
 	case "regions":
 		if m.regions.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	case "auth":
+		if m.authMethods.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	case "users":
+		if m.users.FilterState() == list.Filtering {
 			filter = "on"
 		}
 	}
@@ -2718,6 +3020,12 @@ func compactMeta(m tuiModel) string {
 	if m.pendingRegion != "" {
 		staged = "region:" + m.pendingRegion
 	}
+	if m.pendingAuthMethod != "" {
+		staged = "auth:" + m.pendingAuthMethod
+	}
+	if m.pendingUser != "" {
+		staged = "user:" + m.pendingUser
+	}
 	filter := "off"
 	switch m.mode {
 	case "contexts":
@@ -2734,6 +3042,14 @@ func compactMeta(m tuiModel) string {
 		}
 	case "regions":
 		if m.regions.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	case "auth":
+		if m.authMethods.FilterState() == list.Filtering {
+			filter = "on"
+		}
+	case "users":
+		if m.users.FilterState() == list.Filtering {
 			filter = "on"
 		}
 	}
@@ -2858,6 +3174,34 @@ func (m tuiModel) saveAndQuitCurrentMode() (tea.Model, tea.Cmd) {
 			return m.finalizeSelection()
 		}
 	}
+	if m.mode == "auth" {
+		if item, ok := m.authMethods.SelectedItem().(authMethodItem); ok {
+			m.ctxItem.AuthMethod = config.NormalizeAuthMethod(item.method)
+			if m.parentID == "" {
+				parent := m.ctxItem.CompartmentOCID
+				if parent == "" {
+					parent = m.ctxItem.TenancyOCID
+				}
+				m.parentID = parent
+				m.parentCrumb = parentLabel(parent, m.ctxItem)
+			}
+			return m.finalizeSelection()
+		}
+	}
+	if m.mode == "users" {
+		if item, ok := m.users.SelectedItem().(userItem); ok {
+			m.ctxItem.User = strings.TrimSpace(item.user)
+			if m.parentID == "" {
+				parent := m.ctxItem.CompartmentOCID
+				if parent == "" {
+					parent = m.ctxItem.TenancyOCID
+				}
+				m.parentID = parent
+				m.parentCrumb = parentLabel(parent, m.ctxItem)
+			}
+			return m.finalizeSelection()
+		}
+	}
 	return m, nil
 }
 
@@ -2874,6 +3218,14 @@ func (m tuiModel) finalizeSelection() (tea.Model, tea.Cmd) {
 	m.finalized = true
 	// persist selection (compartment + region if set)
 	m.ctxItem.CompartmentOCID = m.parentID
+	if m.pendingAuthMethod != "" {
+		m.ctxItem.AuthMethod = config.NormalizeAuthMethod(m.pendingAuthMethod)
+	}
+	m.ctxItem.AuthMethod = config.NormalizeAuthMethod(m.ctxItem.AuthMethod)
+	if m.pendingUser != "" {
+		m.ctxItem.User = strings.TrimSpace(m.pendingUser)
+	}
+	m.ctxItem.User = strings.TrimSpace(m.ctxItem.User)
 	m.maybeDeriveContextName()
 	m.selected = m.ctxItem.Name
 	// Region persisted by UpsertContext from ctxItem; regionSet already applied
@@ -2890,6 +3242,15 @@ func (m tuiModel) finalizeSelection() (tea.Model, tea.Cmd) {
 		m.err = err
 		return m, tea.Quit
 	}
+	m.savedContextName = m.ctxItem.Name
+	m.savedTenancyOCID = m.ctxItem.TenancyOCID
+	m.savedCompartmentID = m.ctxItem.CompartmentOCID
+	if m.savedCompartmentID == "" {
+		m.savedCompartmentID = m.ctxItem.TenancyOCID
+	}
+	m.savedRegion = m.ctxItem.Region
+	m.savedAuthMethod = config.NormalizeAuthMethod(m.ctxItem.AuthMethod)
+	m.savedUser = m.ctxItem.User
 	return m, tea.Quit
 }
 

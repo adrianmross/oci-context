@@ -736,8 +736,20 @@ func TestTUITabCyclesMenusForward(t *testing.T) {
 
 	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyTab})
 	res = model.(tuiModel)
+	if res.mode != "auth" {
+		t.Fatalf("expected tab from regions to go to auth, got %s", res.mode)
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyTab})
+	res = model.(tuiModel)
+	if res.mode != "users" {
+		t.Fatalf("expected tab from auth to go to users, got %s", res.mode)
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyTab})
+	res = model.(tuiModel)
 	if res.mode != "contexts" {
-		t.Fatalf("expected tab from regions to go to contexts, got %s", res.mode)
+		t.Fatalf("expected tab from users to go to contexts, got %s", res.mode)
 	}
 }
 
@@ -762,14 +774,20 @@ func TestTUIShiftTabCyclesMenusBackward(t *testing.T) {
 
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	res := model.(tuiModel)
-	if res.mode != "regions" {
-		t.Fatalf("expected shift+tab from contexts to go to regions, got %s", res.mode)
+	if res.mode != "users" {
+		t.Fatalf("expected shift+tab from contexts to go to users, got %s", res.mode)
 	}
 
 	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	res = model.(tuiModel)
-	if res.mode != "compartments" {
-		t.Fatalf("expected shift+tab from regions to go to compartments, got %s", res.mode)
+	if res.mode != "auth" {
+		t.Fatalf("expected shift+tab from users to go to auth, got %s", res.mode)
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	res = model.(tuiModel)
+	if res.mode != "regions" {
+		t.Fatalf("expected shift+tab from auth to go to regions, got %s", res.mode)
 	}
 }
 
@@ -793,11 +811,103 @@ func TestTUIFilterPlaceholderHintIsSet(t *testing.T) {
 	if m.regions.FilterInput.Placeholder != filterPlaceholderHint {
 		t.Fatalf("expected regions filter placeholder %q, got %q", filterPlaceholderHint, m.regions.FilterInput.Placeholder)
 	}
-	if m.list.ShowFilter() || m.tenancies.ShowFilter() || m.comps.ShowFilter() || m.regions.ShowFilter() {
+	if m.authMethods.FilterInput.Placeholder != filterPlaceholderHint {
+		t.Fatalf("expected auth filter placeholder %q, got %q", filterPlaceholderHint, m.authMethods.FilterInput.Placeholder)
+	}
+	if m.users.FilterInput.Placeholder != filterPlaceholderHint {
+		t.Fatalf("expected users filter placeholder %q, got %q", filterPlaceholderHint, m.users.FilterInput.Placeholder)
+	}
+	if m.list.ShowFilter() || m.tenancies.ShowFilter() || m.comps.ShowFilter() || m.regions.ShowFilter() || m.authMethods.ShowFilter() || m.users.ShowFilter() {
 		t.Fatalf("expected filter bars hidden by default when unfiltered")
 	}
-	if m.list.ShowTitle() || m.tenancies.ShowTitle() || m.comps.ShowTitle() || m.regions.ShowTitle() {
+	if m.list.ShowTitle() || m.tenancies.ShowTitle() || m.comps.ShowTitle() || m.regions.ShowTitle() || m.authMethods.ShowTitle() || m.users.ShowTitle() {
 		t.Fatalf("expected list titles hidden to avoid empty chrome rows")
+	}
+}
+
+func TestTUIQAndCtrlSSaveEquivalentInAuthAndUsers(t *testing.T) {
+	base := newTestContextItem()
+	base.AuthMethod = config.AuthMethodAPIKey
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+
+	newAuthModel := func() tuiModel {
+		cfg := config.Config{
+			Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+			Contexts: []config.Context{base.Context},
+		}
+		m := newTuiModel(cfg, cfgPath, []list.Item{base}, nil, "")
+		m.mode = "auth"
+		m.ctxItem = base
+		m.parentID = base.TenancyOCID
+		m.authMethods.SetItems(toAuthMethodList())
+		for i, it := range m.authMethods.Items() {
+			if ai, ok := it.(authMethodItem); ok && ai.method == config.AuthMethodSecurityToken {
+				m.authMethods.Select(i)
+				break
+			}
+		}
+		return m
+	}
+
+	qAuth, _ := newAuthModel().Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	qAuthRes := qAuth.(tuiModel)
+	if !qAuthRes.finalized || config.NormalizeAuthMethod(qAuthRes.ctxItem.AuthMethod) != config.AuthMethodSecurityToken {
+		t.Fatalf("expected q to save selected auth method")
+	}
+
+	sAuth, _ := newAuthModel().Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	sAuthRes := sAuth.(tuiModel)
+	if !sAuthRes.finalized || config.NormalizeAuthMethod(sAuthRes.ctxItem.AuthMethod) != config.AuthMethodSecurityToken {
+		t.Fatalf("expected ctrl+s to save selected auth method")
+	}
+
+	newUserModel := func() tuiModel {
+		cfg := config.Config{
+			Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+			Contexts: []config.Context{base.Context},
+		}
+		m := newTuiModel(cfg, cfgPath, []list.Item{base}, nil, "")
+		m.mode = "users"
+		m.ctxItem = base
+		m.parentID = base.TenancyOCID
+		m.users.SetItems([]list.Item{userItem{user: "ocid1.user.oc1..user"}, userItem{user: "ocid1.user.oc1..newuser"}})
+		m.users.Select(1)
+		return m
+	}
+
+	qUser, _ := newUserModel().Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	qUserRes := qUser.(tuiModel)
+	if !qUserRes.finalized || qUserRes.ctxItem.User != "ocid1.user.oc1..newuser" {
+		t.Fatalf("expected q to save selected user")
+	}
+
+	sUser, _ := newUserModel().Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	sUserRes := sUser.(tuiModel)
+	if !sUserRes.finalized || sUserRes.ctxItem.User != "ocid1.user.oc1..newuser" {
+		t.Fatalf("expected ctrl+s to save selected user")
+	}
+}
+
+func TestTUIAuthAndUserTabsShowStagedDot(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+
+	m.pendingAuthMethod = config.AuthMethodSecurityToken
+	tabs := m.renderTabs()
+	if !strings.Contains(tabs, "Auth") || !strings.Contains(tabs, "●") {
+		t.Fatalf("expected staged dot in auth tab, got %q", tabs)
+	}
+
+	m.pendingAuthMethod = ""
+	m.pendingUser = "ocid1.user.oc1..newuser"
+	tabs = m.renderTabs()
+	if !strings.Contains(tabs, "Users") || !strings.Contains(tabs, "●") {
+		t.Fatalf("expected staged dot in users tab, got %q", tabs)
 	}
 }
 

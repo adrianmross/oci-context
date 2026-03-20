@@ -42,10 +42,11 @@ func newListCmd() *cobra.Command {
 						marker = "*"
 					}
 					if verbose {
-						fmt.Fprintf(cmd.OutOrStdout(), "%s %s (profile=%s region=%s tenancy=%s compartment=%s user=%s)\n",
+						fmt.Fprintf(cmd.OutOrStdout(), "%s %s (profile=%s auth=%s region=%s tenancy=%s compartment=%s user=%s)\n",
 							marker,
 							ctx.Name,
 							ctx.Profile,
+							config.NormalizeAuthMethod(ctx.AuthMethod),
 							ctx.Region,
 							ctx.TenancyOCID,
 							ctx.CompartmentOCID,
@@ -70,10 +71,11 @@ func newListCmd() *cobra.Command {
 					if ctx.Name == cfg.CurrentContext {
 						marker = "*"
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "context=%s%s profile=%s region=%s tenancy=%s compartment=%s user=%s notes=%s\n",
+					fmt.Fprintf(cmd.OutOrStdout(), "context=%s%s profile=%s auth=%s region=%s tenancy=%s compartment=%s user=%s notes=%s\n",
 						ctx.Name,
 						marker,
 						ctx.Profile,
+						config.NormalizeAuthMethod(ctx.AuthMethod),
 						ctx.Region,
 						ctx.TenancyOCID,
 						ctx.CompartmentOCID,
