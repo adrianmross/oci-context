@@ -776,6 +776,8 @@ type tuiModel struct {
 	helpVisible        bool                // keybindings panel toggle
 	initCmd            tea.Cmd             // optional startup command for shortcut modes
 	theme              tuiTheme
+	prefs              tuiPrefs
+	prefsPath          string
 	width              int
 	height             int
 	panelInnerHeight   int
@@ -798,6 +800,12 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	if defaultHeight < 10 {
 		defaultHeight = 10
 	}
+	prefs, prefsPath, prefsErr := loadTUIPrefs()
+	if prefsErr != nil {
+		prefs = defaultTUIPrefs()
+		prefsPath = ""
+	}
+
 	l := list.New(items, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	l.Title = "Select OCI context"
 	l.SetFilteringEnabled(true)
@@ -847,6 +855,8 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 		nameMap:     make(map[string]string),
 		regionCache: make(map[string][]string),
 		theme:       newTUITheme(),
+		prefs:       prefs,
+		prefsPath:   prefsPath,
 		width:       defaultWidth,
 		height:      defaultHeight,
 	}
@@ -896,10 +906,10 @@ func (m *tuiModel) resizeListsForViewport() {
 }
 
 func (m *tuiModel) refreshDelegates() {
-	m.list.SetDelegate(newContextDelegate(&m.pendingContextName, m.ultraCompact))
-	m.tenancies.SetDelegate(newTenancyDelegate(&m.pendingTenancyOCID, m.ultraCompact))
-	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID, m.ultraCompact))
-	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion, m.ultraCompact))
+	m.list.SetDelegate(newContextDelegate(&m.pendingContextName, m.ultraCompact || !m.isModeVerbose("contexts")))
+	m.tenancies.SetDelegate(newTenancyDelegate(&m.pendingTenancyOCID, m.ultraCompact || !m.isModeVerbose("tenancies")))
+	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID, m.ultraCompact || !m.isModeVerbose("compartments")))
+	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion, m.ultraCompact || !m.isModeVerbose("regions")))
 	m.applyDensityMode()
 }
 
@@ -1384,6 +1394,17 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "ULTRA mode: OFF"
 			}
 			return m, nil
+		case "v":
+			next := !m.isModeVerbose(m.mode)
+			m.setModeVerbose(m.mode, next)
+			m.refreshDelegates()
+			m.resizeListsForViewport()
+			if err := saveTUIPrefs(m.prefsPath, m.prefs); err != nil {
+				m.status = fmt.Sprintf("Verbose %s for %s (prefs not saved: %v)", onOff(next), m.mode, err)
+				return m, nil
+			}
+			m.status = fmt.Sprintf("Verbose %s for %s", onOff(next), m.mode)
+			return m, nil
 		}
 	}
 	// handle async comp results
@@ -1567,41 +1588,60 @@ func (m *tuiModel) setActiveListModel(l list.Model) {
 func (m tuiModel) isFilteringActive() bool {
 	switch m.mode {
 	case "contexts":
-		return m.list.FilterState() == list.Filtering
+		return m.list.FilterState() != list.Unfiltered
 	case "tenancies":
-		return m.tenancies.FilterState() == list.Filtering
+		return m.tenancies.FilterState() != list.Unfiltered
 	case "regions":
-		return m.regions.FilterState() == list.Filtering
+		return m.regions.FilterState() != list.Unfiltered
 	default:
-		return m.comps.FilterState() == list.Filtering
+		return m.comps.FilterState() != list.Unfiltered
 	}
 }
 
+func (m tuiModel) isModeVerbose(mode string) bool {
+	switch mode {
+	case "contexts":
+		return m.prefs.VerboseContexts
+	case "tenancies":
+		return m.prefs.VerboseTenancies
+	case "regions":
+		return m.prefs.VerboseRegions
+	default:
+		return m.prefs.VerboseCompartments
+	}
+}
+
+func (m *tuiModel) setModeVerbose(mode string, v bool) {
+	switch mode {
+	case "contexts":
+		m.prefs.VerboseContexts = v
+	case "tenancies":
+		m.prefs.VerboseTenancies = v
+	case "regions":
+		m.prefs.VerboseRegions = v
+	default:
+		m.prefs.VerboseCompartments = v
+	}
+}
+
+func onOff(v bool) string {
+	if v {
+		return "ON"
+	}
+	return "OFF"
+}
+
 func (m tuiModel) shouldUseGridLayout() bool {
-	if m.ultraCompact || m.helpVisible || m.width < 120 || m.isFilteringActive() {
+	if m.ultraCompact || m.helpVisible || m.width < 96 || m.isFilteringActive() {
 		return false
 	}
 	if len(m.activeListModel().Items()) == 0 {
 		return false
 	}
-	return m.paginationWouldOccur()
-}
-
-func (m tuiModel) paginationWouldOccur() bool {
-	itemCount := len(m.activeListModel().Items())
-	if itemCount == 0 {
+	if m.isModeVerbose(m.mode) {
 		return false
 	}
-	rowHeight := 2
-	if m.ultraCompact {
-		rowHeight = 1
-	}
-	needed := itemCount * rowHeight
-	available := m.panelInnerHeight
-	if available <= 0 {
-		available = 10
-	}
-	return needed > available
+	return m.panelInnerHeight >= 3
 }
 
 func (m tuiModel) gridColumnsForCount(count int) int {
@@ -1834,9 +1874,9 @@ func (m tuiModel) shouldInlineHotkeys() bool {
 
 func primaryHotkeys(compact bool) string {
 	if compact {
-		return "enter/backspace drill/up • space stage • / filter • q save • ? help"
+		return "enter/backspace drill/up • space stage • / filter • v verbose • q save • ? help"
 	}
-	return "enter/backspace drill/up • space stage • / filter • q save • ? help"
+	return "enter/backspace drill/up • space stage • / filter • v verbose • q save • ? help"
 }
 
 func inlineStateSummary(m tuiModel) string {
@@ -1858,6 +1898,7 @@ func (m tuiModel) renderHelpPanel() string {
 		"Ctrl+S or q: save and quit",
 		"Esc or Ctrl+C: quit without saving",
 		"/: filter current list",
+		"v: toggle verbose view for current mode",
 		"Backspace/delete: go up/back (when not filtering)",
 		"u: toggle ultra compact mode",
 		"?: toggle this help panel",
