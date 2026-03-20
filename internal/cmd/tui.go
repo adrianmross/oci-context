@@ -1384,16 +1384,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "Keybindings help: OFF"
 			}
 			return m, nil
-		case "u":
-			m.ultraCompact = !m.ultraCompact
-			m.applyDensityMode()
-			m.resizeListsForViewport()
-			if m.ultraCompact {
-				m.status = "ULTRA mode: ON"
-			} else {
-				m.status = "ULTRA mode: OFF"
-			}
-			return m, nil
 		case "v":
 			next := !m.isModeVerbose(m.mode)
 			m.setModeVerbose(m.mode, next)
@@ -1896,7 +1886,6 @@ func (m tuiModel) renderHelpPanel() string {
 		"/: filter current list",
 		"v: toggle verbose view for current mode",
 		"Backspace/delete: go up/back (when not filtering)",
-		"u: toggle ultra compact mode",
 		"?: toggle this help panel",
 		"",
 		"Mode Navigation",
