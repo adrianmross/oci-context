@@ -785,6 +785,7 @@ type tuiModel struct {
 	theme              tuiTheme
 	width              int
 	height             int
+	panelInnerHeight   int
 }
 
 func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles map[string]ocicfg.Profile, startMode string) tuiModel {
@@ -891,6 +892,7 @@ func (m *tuiModel) resizeListsForViewport() {
 	if panelInnerHeight < 4 {
 		panelInnerHeight = 4
 	}
+	m.panelInnerHeight = panelInnerHeight
 
 	m.list.SetSize(panelInnerWidth, panelInnerHeight)
 	m.tenancies.SetSize(panelInnerWidth, panelInnerHeight)
@@ -1605,7 +1607,27 @@ func (m tuiModel) shouldUseGridLayout() bool {
 	if m.ultraCompact || m.helpVisible || m.width < 120 || m.isFilteringActive() {
 		return false
 	}
-	return len(m.activeListModel().Items()) > 0
+	if len(m.activeListModel().Items()) == 0 {
+		return false
+	}
+	return m.paginationWouldOccur()
+}
+
+func (m tuiModel) paginationWouldOccur() bool {
+	itemCount := len(m.activeListModel().Items())
+	if itemCount == 0 {
+		return false
+	}
+	rowHeight := 2
+	if m.ultraCompact {
+		rowHeight = 1
+	}
+	needed := itemCount * rowHeight
+	available := m.panelInnerHeight
+	if available <= 0 {
+		available = 10
+	}
+	return needed > available
 }
 
 func (m tuiModel) gridColumnsForCount(count int) int {
