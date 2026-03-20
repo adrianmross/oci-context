@@ -268,7 +268,8 @@ func toRegionList(regions []string) []list.Item {
 // compDelegate wraps the default delegate to color the pending selection when present.
 type compDelegate struct {
 	list.DefaultDelegate
-	pendingID *string
+	pendingID    *string
+	ultraCompact bool
 }
 
 type markedItem struct {
@@ -280,8 +281,18 @@ func (m markedItem) Title() string       { return m.title }
 func (m markedItem) Description() string { return "" }
 func (m markedItem) FilterValue() string { return m.base.FilterValue() }
 
-func withStageMarker(item list.Item) list.Item {
-	return markedItem{base: item, title: "[*] " + itemTitle(item) + " [staged]"}
+func withStageMarker(item list.Item, ultraCompact bool) list.Item {
+	title := itemTitle(item)
+	if ultraCompact {
+		return markedItem{base: item, title: "[*] " + title}
+	}
+	badge := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("230")).
+		Background(stagedColor).
+		Bold(true).
+		Padding(0, 1).
+		Render("STAGED")
+	return markedItem{base: item, title: fmt.Sprintf("%s  %s", title, badge)}
 }
 
 func itemTitle(item list.Item) string {
@@ -334,7 +345,7 @@ func newCompDelegate(pendingID *string, ultraCompact bool) *compDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &compDelegate{DefaultDelegate: d, pendingID: pendingID}
+	return &compDelegate{DefaultDelegate: d, pendingID: pendingID, ultraCompact: ultraCompact}
 }
 
 func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
@@ -349,7 +360,7 @@ func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 		d.Styles.NormalDesc = pendingDesc
 		d.Styles.SelectedTitle = pendingTitle
 		d.Styles.SelectedDesc = pendingDesc
-		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origNormalTitle
 		d.Styles.NormalDesc = origNormalDesc
 		d.Styles.SelectedTitle = origTitle
@@ -362,20 +373,22 @@ func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 // regionDelegate highlights pending region selection when present.
 type regionDelegate struct {
 	list.DefaultDelegate
-	pendingName *string
+	pendingName  *string
+	ultraCompact bool
 }
 
 // contextDelegate highlights pending context selection when present.
 type contextDelegate struct {
 	list.DefaultDelegate
-	pendingName *string
+	pendingName  *string
+	ultraCompact bool
 }
 
 func newContextDelegate(pendingName *string, ultraCompact bool) *contextDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &contextDelegate{DefaultDelegate: d, pendingName: pendingName}
+	return &contextDelegate{DefaultDelegate: d, pendingName: pendingName, ultraCompact: ultraCompact}
 }
 
 func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
@@ -390,7 +403,7 @@ func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 		d.Styles.NormalDesc = pendingDesc
 		d.Styles.SelectedTitle = pendingTitle
 		d.Styles.SelectedDesc = pendingDesc
-		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origTitle
 		d.Styles.NormalDesc = origDesc
 		d.Styles.SelectedTitle = origSelectedTitle
@@ -403,14 +416,15 @@ func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 // tenancyDelegate highlights pending tenancy selection when present.
 type tenancyDelegate struct {
 	list.DefaultDelegate
-	pendingOCID *string
+	pendingOCID  *string
+	ultraCompact bool
 }
 
 func newTenancyDelegate(pendingOCID *string, ultraCompact bool) *tenancyDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &tenancyDelegate{DefaultDelegate: d, pendingOCID: pendingOCID}
+	return &tenancyDelegate{DefaultDelegate: d, pendingOCID: pendingOCID, ultraCompact: ultraCompact}
 }
 
 func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
@@ -425,7 +439,7 @@ func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 		d.Styles.NormalDesc = pendingDesc
 		d.Styles.SelectedTitle = pendingTitle
 		d.Styles.SelectedDesc = pendingDesc
-		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origTitle
 		d.Styles.NormalDesc = origDesc
 		d.Styles.SelectedTitle = origSelectedTitle
@@ -439,7 +453,7 @@ func newRegionDelegate(pendingName *string, ultraCompact bool) *regionDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &regionDelegate{DefaultDelegate: d, pendingName: pendingName}
+	return &regionDelegate{DefaultDelegate: d, pendingName: pendingName, ultraCompact: ultraCompact}
 }
 
 func (d *regionDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
@@ -454,7 +468,7 @@ func (d *regionDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 		d.Styles.NormalDesc = pendingDesc
 		d.Styles.SelectedTitle = pendingTitle
 		d.Styles.SelectedDesc = pendingDesc
-		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origNormalTitle
 		d.Styles.NormalDesc = origNormalDesc
 		d.Styles.SelectedTitle = origTitle
@@ -1129,6 +1143,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Space acts per mode: mark pending selection with highlight and allow quick save.
 			if m.mode == "contexts" {
 				if item, ok := m.list.SelectedItem().(contextItem); ok {
+					if m.pendingContextName == item.Name {
+						m.pendingContextName = ""
+						m.status = fmt.Sprintf("Context %s unstaged", item.Name)
+						return m, nil
+					}
 					m.ctxItem = item
 					m.pendingContextName = item.Name
 					m.pendingSelectionID = ""
@@ -1147,6 +1166,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.mode == "tenancies" {
 				if item, ok := m.tenancies.SelectedItem().(tenancyItem); ok {
+					if m.pendingTenancyOCID == item.TenancyOCID {
+						m.pendingTenancyOCID = ""
+						m.status = fmt.Sprintf("Tenancy %s unstaged", abbreviateOCID(item.TenancyOCID))
+						return m, nil
+					}
 					m.pendingTenancyOCID = item.TenancyOCID
 					profileName := selectProfileForTenancy(item, m.profiles, m.cfg.Options.DefaultProfile)
 					p, ok := m.profiles[profileName]
@@ -1165,10 +1189,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.mode == "compartments" {
 				if item, ok := m.comps.SelectedItem().(compItem); ok {
-					m.parentID = item.oc.ID
-					m.parentCrumb = item.oc.Name
-					m.nameMap[item.oc.ID] = item.oc.Name
-					m.parentMap[item.oc.ID] = item.oc.Parent
+					if m.pendingSelectionID == item.oc.ID {
+						m.pendingSelectionID = ""
+						m.pendingSelectionNm = ""
+						m.status = fmt.Sprintf("Compartment %s unstaged", item.oc.Name)
+						return m, nil
+					}
 					m.pendingSelectionID = item.oc.ID
 					m.pendingSelectionNm = item.oc.Name
 					m.status = fmt.Sprintf("Selected %s (pending save; Enter/right to drill, Ctrl+S/q to save)", item.oc.Name)
@@ -1177,6 +1203,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.mode == "regions" {
 				if item, ok := m.regions.SelectedItem().(regionItem); ok {
+					if m.pendingRegion == item.name {
+						m.pendingRegion = ""
+						m.status = fmt.Sprintf("Region %s unstaged", item.name)
+						return m, nil
+					}
 					m.ctxItem.Region = item.name
 					m.regionSet = true
 					m.pendingRegion = item.name
@@ -1747,8 +1778,8 @@ func (m tuiModel) saveAndQuitCurrentMode() (tea.Model, tea.Cmd) {
 			parent := ""
 			// If a compartment is staged for the same context that was selected before
 			// this save operation, preserve that staged compartment selection.
-			if m.pendingSelectionID != "" && m.parentID != "" && prevCtxItem.Name == item.Name {
-				parent = m.parentID
+			if m.pendingSelectionID != "" && prevCtxItem.Name == item.Name {
+				parent = m.pendingSelectionID
 			}
 			if parent == "" {
 				parent = item.CompartmentOCID
@@ -1776,6 +1807,12 @@ func (m tuiModel) saveAndQuitCurrentMode() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.mode == "compartments" {
+		if m.pendingSelectionID != "" {
+			m.parentID = m.pendingSelectionID
+			if m.pendingSelectionNm != "" {
+				m.parentCrumb = m.pendingSelectionNm
+			}
+		}
 		return m.finalizeSelection()
 	}
 	if m.mode == "regions" {

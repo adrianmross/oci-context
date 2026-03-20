@@ -138,9 +138,6 @@ func TestTUISpaceStagesCompartment(t *testing.T) {
 	if res.pendingSelectionID != "ocid1.compartment.oc1..child" {
 		t.Fatalf("expected pendingSelectionID set, got %s", res.pendingSelectionID)
 	}
-	if res.parentID != "ocid1.compartment.oc1..child" {
-		t.Fatalf("expected parentID updated to child, got %s", res.parentID)
-	}
 }
 
 func TestTUISpaceStagesContext(t *testing.T) {
@@ -168,6 +165,29 @@ func TestTUISpaceStagesContext(t *testing.T) {
 	}
 }
 
+func TestTUISpaceTogglesUnstageContext(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "contexts"
+	m.list.Select(0)
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	res := model.(tuiModel)
+	if res.pendingContextName != "dev" {
+		t.Fatalf("expected pending context set, got %s", res.pendingContextName)
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeySpace})
+	res = model.(tuiModel)
+	if res.pendingContextName != "" {
+		t.Fatalf("expected pending context cleared on second space, got %s", res.pendingContextName)
+	}
+}
+
 func TestTUIViewShowsCompactMetaLine(t *testing.T) {
 	ci := newTestContextItem()
 	cfg := config.Config{
@@ -186,7 +206,7 @@ func TestTUIViewShowsCompactMetaLine(t *testing.T) {
 	if !strings.Contains(view, "staged:ctx:dev") {
 		t.Fatalf("expected compact meta line to include staged context, got: %s", view)
 	}
-	if !strings.Contains(view, "[*] dev [staged]") {
+	if !strings.Contains(view, "STAGED") {
 		t.Fatalf("expected staged row marker in list output, got: %s", view)
 	}
 }
@@ -359,6 +379,31 @@ func TestTUISpaceStagesRegion(t *testing.T) {
 	}
 	if res.ctxItem.Region != "us-ashburn-1" {
 		t.Fatalf("expected ctxItem.Region updated, got %s", res.ctxItem.Region)
+	}
+}
+
+func TestTUISpaceTogglesUnstageCompartment(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "compartments"
+	comp := compItem{oc: oci.Compartment{ID: "ocid1.compartment.oc1..child", Name: "child", Parent: ci.TenancyOCID, Status: "ACTIVE"}}
+	m.comps.SetItems([]list.Item{comp})
+	m.comps.Select(0)
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	res := model.(tuiModel)
+	if res.pendingSelectionID == "" {
+		t.Fatalf("expected pending compartment set")
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeySpace})
+	res = model.(tuiModel)
+	if res.pendingSelectionID != "" {
+		t.Fatalf("expected pending compartment cleared on second space, got %s", res.pendingSelectionID)
 	}
 }
 
