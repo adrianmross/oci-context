@@ -23,7 +23,7 @@ import (
 
 var (
 	stagedColor      = lipgloss.Color("205")
-	currentColor     = lipgloss.Color("39")
+	currentColor     = lipgloss.Color("42")
 	infoColor        = lipgloss.Color("252")
 	accentColor      = lipgloss.Color("45")
 	activeTabColor   = lipgloss.Color("33")
@@ -55,6 +55,7 @@ type tuiTheme struct {
 	gridCell     lipgloss.Style
 	gridSelected lipgloss.Style
 	gridStaged   lipgloss.Style
+	gridCurrent  lipgloss.Style
 }
 
 func newTUITheme() tuiTheme {
@@ -104,6 +105,9 @@ func newTUITheme() tuiTheme {
 			Padding(0, 1),
 		gridStaged: lipgloss.NewStyle().
 			Foreground(stagedColor).
+			Bold(true),
+		gridCurrent: lipgloss.NewStyle().
+			Foreground(currentColor).
 			Bold(true),
 	}
 }
@@ -434,7 +438,21 @@ func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 		return
 	}
 	if ci, ok := listItem.(compItem); ok && d.currentID != nil && *d.currentID != "" && ci.oc.ID == *d.currentID {
+		origNormalTitle := d.Styles.NormalTitle
+		origNormalDesc := d.Styles.NormalDesc
+		origTitle := d.Styles.SelectedTitle
+		origDesc := d.Styles.SelectedDesc
+		currentTitle := origTitle.Foreground(currentColor).Bold(true)
+		currentDesc := origDesc.Foreground(currentColor).Bold(true)
+		d.Styles.NormalTitle = currentTitle
+		d.Styles.NormalDesc = currentDesc
+		d.Styles.SelectedTitle = currentTitle
+		d.Styles.SelectedDesc = currentDesc
 		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		d.Styles.NormalTitle = origNormalTitle
+		d.Styles.NormalDesc = origNormalDesc
+		d.Styles.SelectedTitle = origTitle
+		d.Styles.SelectedDesc = origDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -509,7 +527,21 @@ func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 		return
 	}
 	if ci, ok := listItem.(contextItem); ok && d.currentName != nil && *d.currentName != "" && ci.Name == *d.currentName {
+		origTitle := d.Styles.NormalTitle
+		origDesc := d.Styles.NormalDesc
+		origSelectedTitle := d.Styles.SelectedTitle
+		origSelectedDesc := d.Styles.SelectedDesc
+		currentTitle := origTitle.Foreground(currentColor).Bold(true)
+		currentDesc := origDesc.Foreground(currentColor).Bold(true)
+		d.Styles.NormalTitle = currentTitle
+		d.Styles.NormalDesc = currentDesc
+		d.Styles.SelectedTitle = currentTitle
+		d.Styles.SelectedDesc = currentDesc
 		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		d.Styles.NormalTitle = origTitle
+		d.Styles.NormalDesc = origDesc
+		d.Styles.SelectedTitle = origSelectedTitle
+		d.Styles.SelectedDesc = origSelectedDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -555,7 +587,21 @@ func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 		return
 	}
 	if ti, ok := listItem.(tenancyItem); ok && d.currentOCID != nil && *d.currentOCID != "" && ti.TenancyOCID == *d.currentOCID {
+		origTitle := d.Styles.NormalTitle
+		origDesc := d.Styles.NormalDesc
+		origSelectedTitle := d.Styles.SelectedTitle
+		origSelectedDesc := d.Styles.SelectedDesc
+		currentTitle := origTitle.Foreground(currentColor).Bold(true)
+		currentDesc := origDesc.Foreground(currentColor).Bold(true)
+		d.Styles.NormalTitle = currentTitle
+		d.Styles.NormalDesc = currentDesc
+		d.Styles.SelectedTitle = currentTitle
+		d.Styles.SelectedDesc = currentDesc
 		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		d.Styles.NormalTitle = origTitle
+		d.Styles.NormalDesc = origDesc
+		d.Styles.SelectedTitle = origSelectedTitle
+		d.Styles.SelectedDesc = origSelectedDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -593,7 +639,21 @@ func (d *regionDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 		return
 	}
 	if ri, ok := listItem.(regionItem); ok && d.currentName != nil && *d.currentName != "" && ri.name == *d.currentName {
+		origNormalTitle := d.Styles.NormalTitle
+		origNormalDesc := d.Styles.NormalDesc
+		origTitle := d.Styles.SelectedTitle
+		origDesc := d.Styles.SelectedDesc
+		currentTitle := origTitle.Foreground(currentColor).Bold(true)
+		currentDesc := origDesc.Foreground(currentColor).Bold(true)
+		d.Styles.NormalTitle = currentTitle
+		d.Styles.NormalDesc = currentDesc
+		d.Styles.SelectedTitle = currentTitle
+		d.Styles.SelectedDesc = currentDesc
 		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		d.Styles.NormalTitle = origNormalTitle
+		d.Styles.NormalDesc = origNormalDesc
+		d.Styles.SelectedTitle = origTitle
+		d.Styles.SelectedDesc = origDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -2339,12 +2399,15 @@ func (m tuiModel) renderGridRows(items []list.Item, cols, cellW, selectedPos, of
 			}
 			title := itemTitle(items[idx])
 			staged := m.isStagedItem(items[idx])
+			current := m.isCurrentSavedItem(items[idx])
 			if staged {
 				if m.ultraCompact {
 					title = "[*] " + title
 				} else {
 					title = title + " " + m.theme.gridStaged.Render("●")
 				}
+			} else if current && !m.ultraCompact {
+				title = title + " " + m.theme.gridCurrent.Render("●")
 			}
 			globalPos := offset + idx
 			if globalPos == selectedPos {
@@ -2375,6 +2438,28 @@ func (m tuiModel) isStagedItem(item list.Item) bool {
 	default:
 		if ci, ok := item.(compItem); ok {
 			return m.pendingSelectionID != "" && ci.oc.ID == m.pendingSelectionID
+		}
+	}
+	return false
+}
+
+func (m tuiModel) isCurrentSavedItem(item list.Item) bool {
+	switch m.mode {
+	case "contexts":
+		if ci, ok := item.(contextItem); ok {
+			return m.savedContextName != "" && ci.Name == m.savedContextName
+		}
+	case "tenancies":
+		if ti, ok := item.(tenancyItem); ok {
+			return m.savedTenancyOCID != "" && ti.TenancyOCID == m.savedTenancyOCID
+		}
+	case "regions":
+		if ri, ok := item.(regionItem); ok {
+			return m.savedRegion != "" && ri.name == m.savedRegion
+		}
+	default:
+		if ci, ok := item.(compItem); ok {
+			return m.savedCompartmentID != "" && ci.oc.ID == m.savedCompartmentID
 		}
 	}
 	return false
