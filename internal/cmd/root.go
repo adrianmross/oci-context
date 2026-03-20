@@ -26,7 +26,8 @@ func buildVersionString() string {
 }
 
 func newRootCmd() *cobra.Command {
-	var showVersion bool
+	var versionCount int
+	var verboseVersion bool
 
 	cmd := &cobra.Command{
 		Use:           "oci-context",
@@ -34,15 +35,24 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if showVersion {
+			if verboseVersion || versionCount >= 2 {
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), buildVersionString())
+				return err
+			}
+			if versionCount >= 1 {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), version)
 				return err
 			}
 			return cmd.Help()
 		},
 	}
 
-	cmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Print version and exit")
+	cmd.Flags().CountVarP(&versionCount, "version", "v", "Print version")
+	cmd.Flags().BoolVar(&verboseVersion, "vversion", false, "Print verbose version")
+	cmd.InitDefaultHelpFlag()
+	if helpFlag := cmd.Flags().Lookup("help"); helpFlag != nil {
+		helpFlag.Usage = "Print this menu"
+	}
 
 	// Persistent flags for defaults (not the context values themselves)
 	pf := cmd.PersistentFlags()
