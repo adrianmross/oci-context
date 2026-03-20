@@ -532,10 +532,14 @@ func contextsFromProfiles(profiles map[string]ocicfg.Profile) []list.Item {
 	return items
 }
 
-func contextsFromConfig(cfg config.Config) []list.Item {
+func contextsFromConfig(cfg config.Config, profiles map[string]ocicfg.Profile) []list.Item {
 	names := make([]string, 0, len(cfg.Contexts))
 	byName := make(map[string]config.Context, len(cfg.Contexts))
 	for _, c := range cfg.Contexts {
+		if isContextEquivalentToProfile(c, profiles) {
+			// Hide contexts that are effectively identical to an OCI profile baseline.
+			continue
+		}
 		names = append(names, c.Name)
 		byName[c.Name] = c
 	}
@@ -549,7 +553,7 @@ func contextsFromConfig(cfg config.Config) []list.Item {
 
 func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, profilesErr error) []list.Item {
 	profileItems := contextsFromProfiles(profiles)
-	contextItems := contextsFromConfig(cfg)
+	contextItems := contextsFromConfig(cfg, profiles)
 	items := make([]list.Item, 0, len(profileItems)+len(contextItems)+4)
 
 	if len(profileItems) > 0 {
@@ -570,6 +574,20 @@ func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, pro
 		return []list.Item{}
 	}
 	return profileItems
+}
+
+func isContextEquivalentToProfile(c config.Context, profiles map[string]ocicfg.Profile) bool {
+	if c.Profile == "" {
+		return false
+	}
+	p, ok := profiles[c.Profile]
+	if !ok {
+		return false
+	}
+	expectedCompartment := p.Tenancy
+	return c.TenancyOCID == p.Tenancy &&
+		c.Region == p.Region &&
+		c.CompartmentOCID == expectedCompartment
 }
 
 // tenanciesFromProfiles groups profiles by tenancy OCID into tenancy items.

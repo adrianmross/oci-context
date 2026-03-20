@@ -460,3 +460,45 @@ func TestPrimeTenancyNamesCachesFriendlyNames(t *testing.T) {
 		t.Fatalf("expected tenancyItem type")
 	}
 }
+
+func TestProfileMenuItemsHidesContextDuplicatesOfProfiles(t *testing.T) {
+	profiles := map[string]ocicfg.Profile{
+		"DEFAULT": {
+			Tenancy: "ocid1.tenancy.oc1..ten",
+			Region:  "us-phoenix-1",
+			User:    "ocid1.user.oc1..u",
+		},
+	}
+	cfg := config.Config{
+		Options: config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{
+			{
+				Name:            "DEFAULT",
+				Profile:         "DEFAULT",
+				TenancyOCID:     "ocid1.tenancy.oc1..ten",
+				CompartmentOCID: "ocid1.tenancy.oc1..ten",
+				Region:          "us-phoenix-1",
+			},
+			{
+				Name:            "DEFAULT@us-ashburn-1",
+				Profile:         "DEFAULT",
+				TenancyOCID:     "ocid1.tenancy.oc1..ten",
+				CompartmentOCID: "ocid1.tenancy.oc1..ten",
+				Region:          "us-ashburn-1",
+			},
+		},
+	}
+
+	items := profileMenuItems(cfg, profiles, nil)
+	var titles []string
+	for _, it := range items {
+		titles = append(titles, itemTitle(it))
+	}
+	got := strings.Join(titles, " | ")
+	if strings.Contains(got, "CONTEXTS | DEFAULT |") {
+		t.Fatalf("expected duplicate DEFAULT context to be hidden, got %q", got)
+	}
+	if !strings.Contains(got, "DEFAULT@us-ashburn-1") {
+		t.Fatalf("expected differing context to remain visible, got %q", got)
+	}
+}
