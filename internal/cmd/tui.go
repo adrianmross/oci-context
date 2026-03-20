@@ -23,6 +23,7 @@ import (
 
 var (
 	stagedColor      = lipgloss.Color("205")
+	currentColor     = lipgloss.Color("39")
 	infoColor        = lipgloss.Color("252")
 	accentColor      = lipgloss.Color("45")
 	activeTabColor   = lipgloss.Color("33")
@@ -284,6 +285,7 @@ func (s sectionItem) FilterValue() string { return "" }
 type compDelegate struct {
 	list.DefaultDelegate
 	pendingID    *string
+	currentID    *string
 	ultraCompact bool
 }
 
@@ -312,8 +314,25 @@ func withStageMarker(item list.Item, ultraCompact bool) list.Item {
 	return markedItem{base: item, title: fmt.Sprintf("%s  %s", title, badge), description: description}
 }
 
+func withCurrentMarker(item list.Item, ultraCompact bool) list.Item {
+	title := itemTitle(item)
+	description := itemDescription(item)
+	if ultraCompact {
+		return markedItem{base: item, title: "[=] " + title, description: description}
+	}
+	badge := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("230")).
+		Background(currentColor).
+		Bold(true).
+		Padding(0, 1).
+		Render("CURRENT")
+	return markedItem{base: item, title: fmt.Sprintf("%s  %s", title, badge), description: description}
+}
+
 func itemTitle(item list.Item) string {
 	switch it := item.(type) {
+	case markedItem:
+		return it.Title()
 	case contextItem:
 		return it.Title()
 	case sectionItem:
@@ -333,6 +352,8 @@ func itemTitle(item list.Item) string {
 
 func itemDescription(item list.Item) string {
 	switch it := item.(type) {
+	case markedItem:
+		return it.Description()
 	case contextItem:
 		return it.Description()
 	case sectionItem:
@@ -381,11 +402,16 @@ func applyDelegateTheme(d *list.DefaultDelegate) {
 	d.Styles.FilterMatch = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 }
 
-func newCompDelegate(pendingID *string, ultraCompact bool) *compDelegate {
+func newCompDelegate(pendingID *string, currentID *string, ultraCompact bool) *compDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &compDelegate{DefaultDelegate: d, pendingID: pendingID, ultraCompact: ultraCompact}
+	return &compDelegate{
+		DefaultDelegate: d,
+		pendingID:       pendingID,
+		currentID:       currentID,
+		ultraCompact:    ultraCompact,
+	}
 }
 
 func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
@@ -407,6 +433,10 @@ func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 		d.Styles.SelectedDesc = origDesc
 		return
 	}
+	if ci, ok := listItem.(compItem); ok && d.currentID != nil && *d.currentID != "" && ci.oc.ID == *d.currentID {
+		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		return
+	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
 }
 
@@ -414,6 +444,7 @@ func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 type regionDelegate struct {
 	list.DefaultDelegate
 	pendingName  *string
+	currentName  *string
 	ultraCompact bool
 }
 
@@ -421,14 +452,20 @@ type regionDelegate struct {
 type contextDelegate struct {
 	list.DefaultDelegate
 	pendingName  *string
+	currentName  *string
 	ultraCompact bool
 }
 
-func newContextDelegate(pendingName *string, ultraCompact bool) *contextDelegate {
+func newContextDelegate(pendingName *string, currentName *string, ultraCompact bool) *contextDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &contextDelegate{DefaultDelegate: d, pendingName: pendingName, ultraCompact: ultraCompact}
+	return &contextDelegate{
+		DefaultDelegate: d,
+		pendingName:     pendingName,
+		currentName:     currentName,
+		ultraCompact:    ultraCompact,
+	}
 }
 
 func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
@@ -471,6 +508,10 @@ func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 		d.Styles.SelectedDesc = origSelectedDesc
 		return
 	}
+	if ci, ok := listItem.(contextItem); ok && d.currentName != nil && *d.currentName != "" && ci.Name == *d.currentName {
+		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		return
+	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
 }
 
@@ -478,14 +519,20 @@ func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 type tenancyDelegate struct {
 	list.DefaultDelegate
 	pendingOCID  *string
+	currentOCID  *string
 	ultraCompact bool
 }
 
-func newTenancyDelegate(pendingOCID *string, ultraCompact bool) *tenancyDelegate {
+func newTenancyDelegate(pendingOCID *string, currentOCID *string, ultraCompact bool) *tenancyDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &tenancyDelegate{DefaultDelegate: d, pendingOCID: pendingOCID, ultraCompact: ultraCompact}
+	return &tenancyDelegate{
+		DefaultDelegate: d,
+		pendingOCID:     pendingOCID,
+		currentOCID:     currentOCID,
+		ultraCompact:    ultraCompact,
+	}
 }
 
 func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
@@ -507,14 +554,23 @@ func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 		d.Styles.SelectedDesc = origSelectedDesc
 		return
 	}
+	if ti, ok := listItem.(tenancyItem); ok && d.currentOCID != nil && *d.currentOCID != "" && ti.TenancyOCID == *d.currentOCID {
+		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		return
+	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
 }
 
-func newRegionDelegate(pendingName *string, ultraCompact bool) *regionDelegate {
+func newRegionDelegate(pendingName *string, currentName *string, ultraCompact bool) *regionDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &regionDelegate{DefaultDelegate: d, pendingName: pendingName, ultraCompact: ultraCompact}
+	return &regionDelegate{
+		DefaultDelegate: d,
+		pendingName:     pendingName,
+		currentName:     currentName,
+		ultraCompact:    ultraCompact,
+	}
 }
 
 func (d *regionDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
@@ -534,6 +590,10 @@ func (d *regionDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 		d.Styles.NormalDesc = origNormalDesc
 		d.Styles.SelectedTitle = origTitle
 		d.Styles.SelectedDesc = origDesc
+		return
+	}
+	if ri, ok := listItem.(regionItem); ok && d.currentName != nil && *d.currentName != "" && ri.name == *d.currentName {
+		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -1012,6 +1072,10 @@ type tuiModel struct {
 	pendingRegion      string              // region pending name
 	pendingContextName string              // context pending name
 	pendingTenancyOCID string              // tenancy pending OCID
+	savedContextName   string              // context currently persisted on disk
+	savedTenancyOCID   string              // tenancy currently persisted on disk
+	savedCompartmentID string              // compartment currently persisted on disk
+	savedRegion        string              // region currently persisted on disk
 	ultraCompact       bool                // minimal chrome mode
 	helpVisible        bool                // keybindings panel toggle
 	initCmd            tea.Cmd             // optional startup command for shortcut modes
@@ -1115,6 +1179,15 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 		width:       defaultWidth,
 		height:      defaultHeight,
 	}
+	if current, err := cfg.GetContext(cfg.CurrentContext); err == nil {
+		m.savedContextName = cfg.CurrentContext
+		m.savedTenancyOCID = current.TenancyOCID
+		m.savedCompartmentID = current.CompartmentOCID
+		if m.savedCompartmentID == "" {
+			m.savedCompartmentID = current.TenancyOCID
+		}
+		m.savedRegion = current.Region
+	}
 	for _, it := range items {
 		if _, ok := it.(sectionItem); ok {
 			m.managedContextMenu = true
@@ -1172,10 +1245,10 @@ func (m *tuiModel) resizeListsForViewport() {
 }
 
 func (m *tuiModel) refreshDelegates() {
-	m.list.SetDelegate(newContextDelegate(&m.pendingContextName, m.ultraCompact || !m.isModeVerbose("contexts")))
-	m.tenancies.SetDelegate(newTenancyDelegate(&m.pendingTenancyOCID, m.ultraCompact || !m.isModeVerbose("tenancies")))
-	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID, m.ultraCompact || !m.isModeVerbose("compartments")))
-	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion, m.ultraCompact || !m.isModeVerbose("regions")))
+	m.list.SetDelegate(newContextDelegate(&m.pendingContextName, &m.savedContextName, m.ultraCompact || !m.isModeVerbose("contexts")))
+	m.tenancies.SetDelegate(newTenancyDelegate(&m.pendingTenancyOCID, &m.savedTenancyOCID, m.ultraCompact || !m.isModeVerbose("tenancies")))
+	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID, &m.savedCompartmentID, m.ultraCompact || !m.isModeVerbose("compartments")))
+	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion, &m.savedRegion, m.ultraCompact || !m.isModeVerbose("regions")))
 	m.applyDensityMode()
 }
 

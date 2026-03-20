@@ -794,3 +794,45 @@ func TestTUIFilterPlaceholderHintIsSet(t *testing.T) {
 		t.Fatalf("expected regions filter placeholder %q, got %q", filterPlaceholderHint, m.regions.FilterInput.Placeholder)
 	}
 }
+
+func TestWithCurrentMarkerAddsLabel(t *testing.T) {
+	item := contextItem{Context: config.Context{Name: "DEFAULT"}}
+	marked := withCurrentMarker(item, false)
+	title := itemTitle(marked)
+	if !strings.Contains(title, "CURRENT") {
+		t.Fatalf("expected CURRENT marker in title, got %q", title)
+	}
+	compact := withCurrentMarker(item, true)
+	if got := itemTitle(compact); !strings.HasPrefix(got, "[=] ") {
+		t.Fatalf("expected compact current prefix, got %q", got)
+	}
+}
+
+func TestTUIInitializesSavedSelectionFromCurrentContext(t *testing.T) {
+	ci := contextItem{Context: config.Context{
+		Name:            "dev",
+		Profile:         "DEFAULT",
+		TenancyOCID:     "ocid1.tenancy.oc1..ten",
+		CompartmentOCID: "ocid1.compartment.oc1..abc",
+		Region:          "us-phoenix-1",
+	}}
+	cfg := config.Config{
+		Options:        config.Options{OCIConfigPath: "/tmp/oci"},
+		CurrentContext: "dev",
+		Contexts:       []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+
+	if m.savedContextName != "dev" {
+		t.Fatalf("expected saved context name dev, got %q", m.savedContextName)
+	}
+	if m.savedTenancyOCID != ci.TenancyOCID {
+		t.Fatalf("expected saved tenancy %q, got %q", ci.TenancyOCID, m.savedTenancyOCID)
+	}
+	if m.savedCompartmentID != ci.CompartmentOCID {
+		t.Fatalf("expected saved compartment %q, got %q", ci.CompartmentOCID, m.savedCompartmentID)
+	}
+	if m.savedRegion != ci.Region {
+		t.Fatalf("expected saved region %q, got %q", ci.Region, m.savedRegion)
+	}
+}
