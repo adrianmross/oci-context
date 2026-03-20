@@ -1675,9 +1675,40 @@ func (m tuiModel) renderActiveGrid() string {
 	if cellW < 18 {
 		cellW = 18
 	}
+	totalRows := (len(items) + cols - 1) / cols
+	visibleRows := m.panelInnerHeight
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
 
-	lines := make([]string, 0, (len(items)+cols-1)/cols)
-	for i := 0; i < len(items); i += cols {
+	selectedIdx := l.Index()
+	if selectedIdx < 0 {
+		selectedIdx = 0
+	}
+	if selectedIdx >= len(items) {
+		selectedIdx = len(items) - 1
+	}
+	selectedRow := selectedIdx / cols
+
+	startRow := 0
+	if totalRows > visibleRows {
+		startRow = selectedRow - (visibleRows / 2)
+		if startRow < 0 {
+			startRow = 0
+		}
+		maxStart := totalRows - visibleRows
+		if startRow > maxStart {
+			startRow = maxStart
+		}
+	}
+	endRow := startRow + visibleRows
+	if endRow > totalRows {
+		endRow = totalRows
+	}
+
+	lines := make([]string, 0, endRow-startRow)
+	for row := startRow; row < endRow; row++ {
+		i := row * cols
 		cells := make([]string, 0, cols)
 		for c := 0; c < cols; c++ {
 			idx := i + c
