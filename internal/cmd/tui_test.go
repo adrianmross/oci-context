@@ -772,3 +772,25 @@ func TestTUIShiftTabCyclesMenusBackward(t *testing.T) {
 		t.Fatalf("expected shift+tab from regions to go to compartments, got %s", res.mode)
 	}
 }
+
+func TestTUIFilterPlaceholderHintIsSet(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+
+	if m.list.FilterInput.Placeholder != filterPlaceholderHint {
+		t.Fatalf("expected contexts filter placeholder %q, got %q", filterPlaceholderHint, m.list.FilterInput.Placeholder)
+	}
+	if m.tenancies.FilterInput.Placeholder != filterPlaceholderHint {
+		t.Fatalf("expected tenancies filter placeholder %q, got %q", filterPlaceholderHint, m.tenancies.FilterInput.Placeholder)
+	}
+	if m.comps.FilterInput.Placeholder != filterPlaceholderHint {
+		t.Fatalf("expected compartments filter placeholder %q, got %q", filterPlaceholderHint, m.comps.FilterInput.Placeholder)
+	}
+	if m.regions.FilterInput.Placeholder != filterPlaceholderHint {
+		t.Fatalf("expected regions filter placeholder %q, got %q", filterPlaceholderHint, m.regions.FilterInput.Placeholder)
+	}
+}

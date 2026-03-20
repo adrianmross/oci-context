@@ -203,6 +203,8 @@ var fallbackRegions = []string{
 	"il-jerusalem-1",
 }
 
+const filterPlaceholderHint = "press esc to escape"
+
 // abbreviateOCID shortens an OCID for display.
 func abbreviateOCID(s string) string {
 	if len(s) <= 16 {
@@ -1049,11 +1051,13 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	l := list.New(items, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	l.Title = "Select OCI context"
 	l.SetFilteringEnabled(true)
+	l.FilterInput.Placeholder = filterPlaceholderHint
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	tn := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	tn.Title = "Select tenancy"
 	tn.SetFilteringEnabled(true)
+	tn.FilterInput.Placeholder = filterPlaceholderHint
 	tn.SetShowHelp(false)
 	tn.SetShowStatusBar(false)
 	if len(profiles) > 0 {
@@ -1082,12 +1086,14 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	cl := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	cl.Title = "Select compartment (lazy load)"
 	cl.SetFilteringEnabled(true)
+	cl.FilterInput.Placeholder = filterPlaceholderHint
 	cl.SetShowHelp(false)
 	cl.SetShowStatusBar(false)
 	// delegate with pending highlight is attached after model creation
 	rl := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	rl.Title = "Select region"
 	rl.SetFilteringEnabled(true)
+	rl.FilterInput.Placeholder = filterPlaceholderHint
 	rl.SetShowHelp(false)
 	rl.SetShowStatusBar(false)
 	m := tuiModel{
