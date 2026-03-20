@@ -1589,10 +1589,7 @@ func (m tuiModel) renderMetaLine() string {
 }
 
 func (m tuiModel) renderMetaLineWithHotkeys() string {
-	meta := compactMeta(m)
-	if m.width > 0 && m.width < 90 {
-		meta = compactMetaNarrow(m)
-	}
+	meta := inlineStateSummary(m)
 	hotkeys := primaryHotkeys(m.width > 0 && m.width < 90)
 	return m.theme.metaBar.Render(lipgloss.JoinHorizontal(
 		lipgloss.Top,
@@ -1616,6 +1613,17 @@ func primaryHotkeys(compact bool) string {
 		return "enter/backspace drill/up • space stage • / filter • q save • ? help"
 	}
 	return "enter/backspace drill/up • space toggle-stage • / filter • q save • esc quit • ? help"
+}
+
+func inlineStateSummary(m tuiModel) string {
+	current := m.ctxItem.Name
+	if current == "" {
+		current = m.cfg.CurrentContext
+	}
+	if current == "" {
+		current = "-"
+	}
+	return fmt.Sprintf("mode:%s | current:%s", m.mode, current)
 }
 
 func (m tuiModel) renderHelpPanel() string {
