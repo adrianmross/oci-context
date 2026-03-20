@@ -1612,7 +1612,7 @@ func primaryHotkeys(compact bool) string {
 	if compact {
 		return "enter/backspace drill/up • space stage • / filter • q save • ? help"
 	}
-	return "enter/backspace drill/up • space toggle-stage • / filter • q save • esc quit • ? help"
+	return "enter/backspace drill/up • space stage • / filter • q save • ? help"
 }
 
 func inlineStateSummary(m tuiModel) string {
