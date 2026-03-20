@@ -532,7 +532,7 @@ func (d *regionDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 }
 
 // contextsFromProfiles builds context items from OCI CLI profiles.
-func contextsFromProfiles(profiles map[string]ocicfg.Profile) []list.Item {
+func contextsFromProfiles(profiles map[string]ocicfg.Profile, current config.Context, hasCurrent bool) []list.Item {
 	names := make([]string, 0, len(profiles))
 	for name := range profiles {
 		names = append(names, name)
@@ -541,14 +541,18 @@ func contextsFromProfiles(profiles map[string]ocicfg.Profile) []list.Item {
 	items := make([]list.Item, 0, len(names))
 	for _, name := range names {
 		p := profiles[name]
-		items = append(items, contextItem{Context: config.Context{
+		ci := contextItem{Context: config.Context{
 			Name:            name,
 			Profile:         name,
 			TenancyOCID:     p.Tenancy,
 			CompartmentOCID: p.Tenancy,
 			Region:          p.Region,
 			User:            p.User,
-		}})
+		}}
+		if hasCurrent && isContextEquivalentToNamedProfile(current, name, p) {
+			ci.isCurrent = true
+		}
+		items = append(items, ci)
 	}
 	return items
 }
@@ -613,7 +617,8 @@ func contextSignature(c config.Context) string {
 }
 
 func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, profilesErr error) []list.Item {
-	profileItems := contextsFromProfiles(profiles)
+	current, hasCurrent := cfg.GetContext(cfg.CurrentContext)
+	profileItems := contextsFromProfiles(profiles, current, hasCurrent == nil)
 	contextItems := contextsFromConfig(cfg, profiles)
 	items := make([]list.Item, 0, len(profileItems)+len(contextItems)+4)
 
@@ -664,6 +669,29 @@ func isContextEquivalentToProfile(c config.Context, profiles map[string]ocicfg.P
 	return tenancy == p.Tenancy &&
 		region == p.Region &&
 		compartment == p.Tenancy
+}
+
+func isContextEquivalentToNamedProfile(c config.Context, profileName string, p ocicfg.Profile) bool {
+	ctxProfile := c.Profile
+	if ctxProfile == "" {
+		ctxProfile = c.Name
+	}
+	if ctxProfile != profileName {
+		return false
+	}
+	tenancy := c.TenancyOCID
+	if tenancy == "" {
+		tenancy = p.Tenancy
+	}
+	region := c.Region
+	if region == "" {
+		region = p.Region
+	}
+	compartment := c.CompartmentOCID
+	if compartment == "" {
+		compartment = tenancy
+	}
+	return tenancy == p.Tenancy && region == p.Region && compartment == p.Tenancy
 }
 
 // tenanciesFromProfiles groups profiles by tenancy OCID into tenancy items.
@@ -733,7 +761,7 @@ func runPromptFallback(cmd *cobra.Command, cfgPathFlag string) error {
 		return err
 	}
 	profiles, perr := ocicfg.LoadProfiles(cfg.Options.OCIConfigPath)
-	items := contextsFromProfiles(profiles)
+	items := contextsFromProfiles(profiles, config.Context{}, false)
 	if perr != nil || len(items) == 0 {
 		return fmt.Errorf("no profiles available from %s", cfg.Options.OCIConfigPath)
 	}
@@ -843,6 +871,9 @@ type contextItem struct {
 
 func (c contextItem) Title() string {
 	if c.isCurrent {
+		if !c.fromSaved {
+			return c.Name + " @CURRENT"
+		}
 		return "@CURRENT"
 	}
 	return c.Name

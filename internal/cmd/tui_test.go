@@ -605,3 +605,42 @@ func TestProfileMenuItemsDedupesEquivalentSavedContextsKeepingCurrent(t *testing
 		t.Fatalf("expected current context to be retained, got %v", savedNames)
 	}
 }
+
+func TestProfileMenuItemsCurrentEquivalentContextPromotesToProfileCurrentLabel(t *testing.T) {
+	profiles := map[string]ocicfg.Profile{
+		"DEFAULT": {
+			Tenancy: "ocid1.tenancy.oc1..ten",
+			Region:  "us-phoenix-1",
+		},
+	}
+	cfg := config.Config{
+		Options:        config.Options{OCIConfigPath: "/tmp/oci"},
+		CurrentContext: "DEFAULT",
+		Contexts: []config.Context{
+			{
+				Name:            "DEFAULT",
+				Profile:         "DEFAULT",
+				TenancyOCID:     "ocid1.tenancy.oc1..ten",
+				CompartmentOCID: "ocid1.tenancy.oc1..ten",
+				Region:          "us-phoenix-1",
+			},
+		},
+	}
+
+	items := profileMenuItems(cfg, profiles, nil)
+	var titles []string
+	var hasSavedCurrent bool
+	for _, it := range items {
+		titles = append(titles, itemTitle(it))
+		if ci, ok := it.(contextItem); ok && ci.fromSaved && ci.isCurrent {
+			hasSavedCurrent = true
+		}
+	}
+	got := strings.Join(titles, " | ")
+	if hasSavedCurrent {
+		t.Fatalf("expected equivalent saved current context to be deduped, got %q", got)
+	}
+	if !strings.Contains(got, "DEFAULT @CURRENT") {
+		t.Fatalf("expected current profile row to be marked, got %q", got)
+	}
+}
