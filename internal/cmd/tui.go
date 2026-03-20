@@ -443,19 +443,11 @@ func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 	if ci, ok := listItem.(compItem); ok && d.currentID != nil && *d.currentID != "" && ci.oc.ID == *d.currentID {
 		origNormalTitle := d.Styles.NormalTitle
 		origNormalDesc := d.Styles.NormalDesc
-		origTitle := d.Styles.SelectedTitle
-		origDesc := d.Styles.SelectedDesc
-		currentTitle := origTitle.Foreground(currentColor).Bold(true)
-		currentDesc := origDesc.Foreground(currentColor).Bold(true)
-		d.Styles.NormalTitle = currentTitle
-		d.Styles.NormalDesc = currentDesc
-		d.Styles.SelectedTitle = currentTitle
-		d.Styles.SelectedDesc = currentDesc
+		d.Styles.NormalTitle = origNormalTitle.Foreground(currentColor).Bold(true)
+		d.Styles.NormalDesc = origNormalDesc.Foreground(currentColor).Bold(true)
 		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origNormalTitle
 		d.Styles.NormalDesc = origNormalDesc
-		d.Styles.SelectedTitle = origTitle
-		d.Styles.SelectedDesc = origDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -532,19 +524,11 @@ func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 	if ci, ok := listItem.(contextItem); ok && d.currentName != nil && *d.currentName != "" && ci.Name == *d.currentName {
 		origTitle := d.Styles.NormalTitle
 		origDesc := d.Styles.NormalDesc
-		origSelectedTitle := d.Styles.SelectedTitle
-		origSelectedDesc := d.Styles.SelectedDesc
-		currentTitle := origTitle.Foreground(currentColor).Bold(true)
-		currentDesc := origDesc.Foreground(currentColor).Bold(true)
-		d.Styles.NormalTitle = currentTitle
-		d.Styles.NormalDesc = currentDesc
-		d.Styles.SelectedTitle = currentTitle
-		d.Styles.SelectedDesc = currentDesc
+		d.Styles.NormalTitle = origTitle.Foreground(currentColor).Bold(true)
+		d.Styles.NormalDesc = origDesc.Foreground(currentColor).Bold(true)
 		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origTitle
 		d.Styles.NormalDesc = origDesc
-		d.Styles.SelectedTitle = origSelectedTitle
-		d.Styles.SelectedDesc = origSelectedDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -592,19 +576,11 @@ func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 	if ti, ok := listItem.(tenancyItem); ok && d.currentOCID != nil && *d.currentOCID != "" && ti.TenancyOCID == *d.currentOCID {
 		origTitle := d.Styles.NormalTitle
 		origDesc := d.Styles.NormalDesc
-		origSelectedTitle := d.Styles.SelectedTitle
-		origSelectedDesc := d.Styles.SelectedDesc
-		currentTitle := origTitle.Foreground(currentColor).Bold(true)
-		currentDesc := origDesc.Foreground(currentColor).Bold(true)
-		d.Styles.NormalTitle = currentTitle
-		d.Styles.NormalDesc = currentDesc
-		d.Styles.SelectedTitle = currentTitle
-		d.Styles.SelectedDesc = currentDesc
+		d.Styles.NormalTitle = origTitle.Foreground(currentColor).Bold(true)
+		d.Styles.NormalDesc = origDesc.Foreground(currentColor).Bold(true)
 		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origTitle
 		d.Styles.NormalDesc = origDesc
-		d.Styles.SelectedTitle = origSelectedTitle
-		d.Styles.SelectedDesc = origSelectedDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -644,19 +620,11 @@ func (d *regionDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 	if ri, ok := listItem.(regionItem); ok && d.currentName != nil && *d.currentName != "" && ri.name == *d.currentName {
 		origNormalTitle := d.Styles.NormalTitle
 		origNormalDesc := d.Styles.NormalDesc
-		origTitle := d.Styles.SelectedTitle
-		origDesc := d.Styles.SelectedDesc
-		currentTitle := origTitle.Foreground(currentColor).Bold(true)
-		currentDesc := origDesc.Foreground(currentColor).Bold(true)
-		d.Styles.NormalTitle = currentTitle
-		d.Styles.NormalDesc = currentDesc
-		d.Styles.SelectedTitle = currentTitle
-		d.Styles.SelectedDesc = currentDesc
+		d.Styles.NormalTitle = origNormalTitle.Foreground(currentColor).Bold(true)
+		d.Styles.NormalDesc = origNormalDesc.Foreground(currentColor).Bold(true)
 		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origNormalTitle
 		d.Styles.NormalDesc = origNormalDesc
-		d.Styles.SelectedTitle = origTitle
-		d.Styles.SelectedDesc = origDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
