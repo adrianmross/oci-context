@@ -1103,6 +1103,7 @@ type tuiModel struct {
 	pendingRegion      string              // region pending name
 	pendingContextName string              // context pending name
 	pendingTenancyOCID string              // tenancy pending OCID
+	autoStagedTenancy  bool                // true when tenancy was auto-staged from compartment stage
 	savedContextName   string              // context currently persisted on disk
 	savedTenancyOCID   string              // tenancy currently persisted on disk
 	savedCompartmentID string              // compartment currently persisted on disk
@@ -1621,10 +1622,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if item, ok := m.tenancies.SelectedItem().(tenancyItem); ok {
 					if m.pendingTenancyOCID == item.TenancyOCID {
 						m.pendingTenancyOCID = ""
+						m.autoStagedTenancy = false
 						m.status = fmt.Sprintf("Tenancy %s unstaged", abbreviateOCID(item.TenancyOCID))
 						return m, nil
 					}
 					m.pendingTenancyOCID = item.TenancyOCID
+					m.autoStagedTenancy = false
 					profileName := selectProfileForTenancy(item, m.profiles, m.cfg.Options.DefaultProfile)
 					p, ok := m.profiles[profileName]
 					if ok {
@@ -1645,11 +1648,19 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.pendingSelectionID == item.oc.ID {
 						m.pendingSelectionID = ""
 						m.pendingSelectionNm = ""
+						if m.autoStagedTenancy {
+							m.pendingTenancyOCID = ""
+							m.autoStagedTenancy = false
+						}
 						m.status = fmt.Sprintf("Compartment %s unstaged", item.oc.Name)
 						return m, nil
 					}
 					m.pendingSelectionID = item.oc.ID
 					m.pendingSelectionNm = item.oc.Name
+					if m.pendingTenancyOCID == "" && m.ctxItem.TenancyOCID != "" {
+						m.pendingTenancyOCID = m.ctxItem.TenancyOCID
+						m.autoStagedTenancy = true
+					}
 					m.status = fmt.Sprintf("Selected %s (pending save; Enter/right to drill, Ctrl+S/q to save)", item.oc.Name)
 				}
 				return m, nil
@@ -2472,6 +2483,9 @@ func (m tuiModel) renderTabs() string {
 	rendered := make([]string, 0, len(labels))
 	for _, tab := range labels {
 		label := tab.label
+		if m.isModeStaged(tab.mode) {
+			label += " " + lipgloss.NewStyle().Foreground(stagedColor).Bold(true).Render("●")
+		}
 		if tab.mode == m.mode {
 			rendered = append(rendered, m.theme.tabActive.Render(label))
 			continue
@@ -2479,6 +2493,19 @@ func (m tuiModel) renderTabs() string {
 		rendered = append(rendered, m.theme.tabInactive.Render(label))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+}
+
+func (m tuiModel) isModeStaged(mode string) bool {
+	switch mode {
+	case "contexts":
+		return m.pendingContextName != ""
+	case "tenancies":
+		return m.pendingTenancyOCID != ""
+	case "regions":
+		return m.pendingRegion != ""
+	default:
+		return m.pendingSelectionID != ""
+	}
 }
 
 func (m tuiModel) renderMetaLine() string {

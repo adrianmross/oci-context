@@ -836,3 +836,60 @@ func TestTUIInitializesSavedSelectionFromCurrentContext(t *testing.T) {
 		t.Fatalf("expected saved region %q, got %q", ci.Region, m.savedRegion)
 	}
 }
+
+func TestTUIStagingCompartmentAutoStagesTenancy(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "compartments"
+	m.ctxItem = ci
+	comp := compItem{oc: oci.Compartment{ID: "ocid1.compartment.oc1..child", Name: "child", Parent: ci.TenancyOCID, Status: "ACTIVE"}}
+	m.comps.SetItems([]list.Item{comp})
+	m.comps.Select(0)
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	res := model.(tuiModel)
+	if res.pendingSelectionID != "ocid1.compartment.oc1..child" {
+		t.Fatalf("expected staged compartment, got %q", res.pendingSelectionID)
+	}
+	if res.pendingTenancyOCID != ci.TenancyOCID {
+		t.Fatalf("expected auto-staged tenancy %q, got %q", ci.TenancyOCID, res.pendingTenancyOCID)
+	}
+	if !res.autoStagedTenancy {
+		t.Fatalf("expected autoStagedTenancy=true")
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeySpace})
+	res = model.(tuiModel)
+	if res.pendingSelectionID != "" {
+		t.Fatalf("expected compartment to unstage")
+	}
+	if res.pendingTenancyOCID != "" {
+		t.Fatalf("expected auto-staged tenancy to clear when compartment unstaged, got %q", res.pendingTenancyOCID)
+	}
+}
+
+func TestTUIRenderTabsShowsStagedDotPerMenu(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.pendingRegion = "us-ashburn-1"
+	m.pendingSelectionID = "ocid1.compartment.oc1..child"
+
+	tabs := m.renderTabs()
+	if !strings.Contains(tabs, "Reg") && !strings.Contains(tabs, "Regions") {
+		t.Fatalf("expected regions tab to render, got %q", tabs)
+	}
+	if !strings.Contains(tabs, "Comp") && !strings.Contains(tabs, "Compartments") {
+		t.Fatalf("expected compartments tab to render, got %q", tabs)
+	}
+	if !strings.Contains(tabs, "●") {
+		t.Fatalf("expected staged dot in tab bar, got %q", tabs)
+	}
+}
