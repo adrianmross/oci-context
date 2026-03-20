@@ -264,6 +264,12 @@ func toRegionList(regions []string) []list.Item {
 	return items
 }
 
+type separatorItem struct{}
+
+func (s separatorItem) Title() string       { return "" }
+func (s separatorItem) Description() string { return "" }
+func (s separatorItem) FilterValue() string { return "" }
+
 type sectionItem struct {
 	title string
 }
@@ -310,6 +316,8 @@ func itemTitle(item list.Item) string {
 		return it.Title()
 	case sectionItem:
 		return it.Title()
+	case separatorItem:
+		return ""
 	case tenancyItem:
 		return it.Title()
 	case compItem:
@@ -327,6 +335,8 @@ func itemDescription(item list.Item) string {
 		return it.Description()
 	case sectionItem:
 		return it.Description()
+	case separatorItem:
+		return ""
 	case tenancyItem:
 		return it.Description()
 	case compItem:
@@ -420,6 +430,11 @@ func newContextDelegate(pendingName *string, ultraCompact bool) *contextDelegate
 }
 
 func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	if _, ok := listItem.(separatorItem); ok {
+		line := strings.Repeat("─", 36)
+		fmt.Fprint(w, lipgloss.NewStyle().Foreground(panelColor).Render(line))
+		return
+	}
 	if si, ok := listItem.(sectionItem); ok {
 		fmt.Fprint(w, lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true).Render(si.Title()))
 		return
@@ -557,12 +572,11 @@ func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, pro
 	items := make([]list.Item, 0, len(profileItems)+len(contextItems)+4)
 
 	if len(profileItems) > 0 {
-		items = append(items, sectionItem{title: "PROFILES"})
 		items = append(items, profileItems...)
 	}
 	if len(contextItems) > 0 {
-		if len(items) > 0 {
-			items = append(items, sectionItem{title: "CONTEXTS"})
+		if len(profileItems) > 0 {
+			items = append(items, separatorItem{})
 		}
 		items = append(items, contextItems...)
 	}
@@ -1743,7 +1757,7 @@ func (m tuiModel) effectiveGridLayout() bool {
 }
 
 func (m tuiModel) gridAllowedInCurrentState() bool {
-	if m.ultraCompact || m.helpVisible || m.width < 96 || m.activeListFilterState() == list.Filtering {
+	if m.ultraCompact || m.helpVisible || m.width < 96 || m.isFilteringActive() {
 		return false
 	}
 	return len(m.activeGridItems()) > 0
@@ -1768,6 +1782,7 @@ func (m tuiModel) gridColumnsForCount(count int) int {
 }
 
 func (m *tuiModel) moveActiveSelectionGrid(key string) bool {
+	mapIdx := m.activeGridIndexMap()
 	items := m.activeGridItems()
 	var delta int
 	switch key {
@@ -1784,23 +1799,31 @@ func (m *tuiModel) moveActiveSelectionGrid(key string) bool {
 	}
 
 	l := m.activeListModel()
-	if len(items) == 0 {
+	if len(items) == 0 || len(mapIdx) == 0 {
 		return false
 	}
-	cur := l.Index()
-	next := cur + delta
-	if next < 0 || next >= len(items) {
+	curList := l.Index()
+	pos := 0
+	for i, li := range mapIdx {
+		if li == curList {
+			pos = i
+			break
+		}
+	}
+	nextPos := pos + delta
+	if nextPos < 0 || nextPos >= len(items) {
 		return true
 	}
-	l.Select(next)
+	l.Select(mapIdx[nextPos])
 	m.setActiveListModel(l)
 	return true
 }
 
 func (m tuiModel) renderActiveGrid() string {
 	l := m.activeListModel()
+	idxMap := m.activeGridIndexMap()
 	items := m.activeGridItems()
-	if len(items) == 0 {
+	if len(items) == 0 || len(idxMap) == 0 {
 		return ""
 	}
 
@@ -1815,14 +1838,35 @@ func (m tuiModel) renderActiveGrid() string {
 		visibleRows = 1
 	}
 
-	selectedIdx := l.Index()
-	if selectedIdx < 0 {
-		selectedIdx = 0
+	selectedPos := 0
+	for i, li := range idxMap {
+		if li == l.Index() {
+			selectedPos = i
+			break
+		}
 	}
-	if selectedIdx >= len(items) {
-		selectedIdx = len(items) - 1
+	selectedRow := selectedPos / cols
+
+	// If we have profile+context groups and enough vertical room, render as stacked matrices.
+	if m.mode == "contexts" {
+		split := 0
+		for i, it := range items {
+			if ci, ok := it.(contextItem); ok && ci.fromSaved {
+				split = i
+				break
+			}
+		}
+		if split > 0 && split < len(items) {
+			rowsTop := (split + cols - 1) / cols
+			rowsBottom := (len(items) - split + cols - 1) / cols
+			if rowsTop+rowsBottom+1 <= visibleRows {
+				top := m.renderGridRows(items[:split], cols, cellW, selectedPos, 0, rowsTop)
+				bottom := m.renderGridRows(items[split:], cols, cellW, selectedPos, split, rowsBottom)
+				divider := lipgloss.NewStyle().Foreground(panelColor).Render(strings.Repeat("─", max(12, m.width-8)))
+				return strings.Join(append(append(top, divider), bottom...), "\n")
+			}
+		}
 	}
-	selectedRow := selectedIdx / cols
 
 	startRow := 0
 	if totalRows > visibleRows {
@@ -1840,8 +1884,43 @@ func (m tuiModel) renderActiveGrid() string {
 		endRow = totalRows
 	}
 
-	lines := make([]string, 0, endRow-startRow)
-	for row := startRow; row < endRow; row++ {
+	lines := m.renderGridRows(items, cols, cellW, selectedPos, 0, endRow-startRow)
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) activeGridItems() []list.Item {
+	l := m.activeListModel()
+	base := l.Items()
+	out := make([]list.Item, 0, len(base))
+	for _, it := range base {
+		if _, sep := it.(separatorItem); sep {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+func (m tuiModel) activeGridIndexMap() []int {
+	l := m.activeListModel()
+	base := l.Items()
+	out := make([]int, 0, len(base))
+	for i, it := range base {
+		if _, sep := it.(separatorItem); sep {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out
+}
+
+func (m tuiModel) renderGridRows(items []list.Item, cols, cellW, selectedPos, offset, rows int) []string {
+	lines := make([]string, 0, rows)
+	totalRows := (len(items) + cols - 1) / cols
+	if rows > totalRows {
+		rows = totalRows
+	}
+	for row := 0; row < rows; row++ {
 		i := row * cols
 		cells := make([]string, 0, cols)
 		for c := 0; c < cols; c++ {
@@ -1850,7 +1929,6 @@ func (m tuiModel) renderActiveGrid() string {
 				cells = append(cells, lipgloss.NewStyle().Width(cellW).Render(""))
 				continue
 			}
-
 			title := itemTitle(items[idx])
 			staged := m.isStagedItem(items[idx])
 			if staged {
@@ -1860,7 +1938,8 @@ func (m tuiModel) renderActiveGrid() string {
 					title = title + " " + m.theme.gridStaged.Render("●")
 				}
 			}
-			if idx == l.Index() {
+			globalPos := offset + idx
+			if globalPos == selectedPos {
 				cells = append(cells, m.theme.gridSelected.Width(cellW).Render(title))
 			} else {
 				cells = append(cells, m.theme.gridCell.Width(cellW).Render(title))
@@ -1868,15 +1947,7 @@ func (m tuiModel) renderActiveGrid() string {
 		}
 		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, cells...))
 	}
-	return strings.Join(lines, "\n")
-}
-
-func (m tuiModel) activeGridItems() []list.Item {
-	l := m.activeListModel()
-	if m.activeListFilterState() == list.FilterApplied {
-		return l.VisibleItems()
-	}
-	return l.Items()
+	return lines
 }
 
 func (m tuiModel) isStagedItem(item list.Item) bool {
