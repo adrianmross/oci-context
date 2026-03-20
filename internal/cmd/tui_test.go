@@ -942,3 +942,25 @@ func TestTUIEnterDrillsFromAppliedCompartmentFilterAndClearsFilter(t *testing.T)
 		t.Fatalf("expected compartment filter text to be cleared, got %q", res.comps.FilterValue())
 	}
 }
+
+func TestTUIBackspaceAtCompartmentRootReturnsToTenancies(t *testing.T) {
+	ci := newTestContextItem()
+	profiles := map[string]ocicfg.Profile{
+		"DEFAULT": {Tenancy: ci.TenancyOCID, Region: ci.Region},
+	}
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, profiles, "")
+	m.mode = "compartments"
+	m.ctxItem = ci
+	m.parentID = ci.TenancyOCID
+	m.parentCrumb = "root"
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	res := model.(tuiModel)
+	if res.mode != "tenancies" {
+		t.Fatalf("expected to return to tenancies from root, got %s", res.mode)
+	}
+}

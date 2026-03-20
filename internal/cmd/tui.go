@@ -1334,10 +1334,15 @@ func (m *tuiModel) applyStartMode(startMode string) {
 
 // goUpOne navigates to the known parent using recorded parent relationships.
 func (m tuiModel) goUpOne() (tea.Model, tea.Cmd) {
-	// If already at tenancy root, go back to contexts instead of reloading root.
+	// If already at tenancy root, go back to tenancies instead of reloading root.
 	if m.parentID == m.ctxItem.TenancyOCID {
-		m.mode = "contexts"
-		m.status = ""
+		if len(m.tenancies.Items()) > 0 {
+			m.mode = "tenancies"
+			m.status = "Select tenancy (Enter to use a profile and open root)"
+		} else {
+			m.mode = "contexts"
+			m.status = ""
+		}
 		m.crumb = ""
 		return m, nil
 	}
