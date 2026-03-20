@@ -31,3 +31,30 @@ func TestRenderLaunchdPlistIncludesArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderWakeupScript(t *testing.T) {
+	s := renderWakeupScript("/usr/local/bin/oci-context", "com.example.daemon")
+	for _, want := range []string{
+		"launchctl kickstart -k gui/$(id -u)/com.example.daemon",
+		"daemon nudge",
+		"/usr/local/bin/oci-context",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("expected wake script to contain %q", want)
+		}
+	}
+}
+
+func TestRenderSleepwatcherPlist(t *testing.T) {
+	plist := renderSleepwatcherPlist("com.example.sleepwatcher", "/opt/homebrew/bin/sleepwatcher", "/Users/me/.wakeup")
+	for _, want := range []string{
+		"<string>com.example.sleepwatcher</string>",
+		"<string>/opt/homebrew/bin/sleepwatcher</string>",
+		"<string>-w</string>",
+		"<string>/Users/me/.wakeup</string>",
+	} {
+		if !strings.Contains(plist, want) {
+			t.Fatalf("expected sleepwatcher plist to contain %q", want)
+		}
+	}
+}

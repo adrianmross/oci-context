@@ -147,6 +147,8 @@ func (s *Service) handle(req ipcmsg.Request) (interface{}, error) {
 		return s.export(req.Format)
 	case "auth_status":
 		return s.authStatus(req.Name)
+	case "auth_nudge":
+		return s.authNudge(req.Name)
 	default:
 		return nil, srvipc.ErrNotImplemented
 	}
@@ -278,6 +280,43 @@ func (s *Service) authStatus(name string) (interface{}, error) {
 		st.Mode = authModeForMethod(st.AuthMethod)
 	}
 	return toAuthStatus(st), nil
+}
+
+func (s *Service) authNudge(name string) (interface{}, error) {
+	if err := s.reloadConfig(); err != nil {
+		return nil, err
+	}
+	cfg := s.currentConfig()
+	target := strings.TrimSpace(name)
+	targets := monitoredContextNames(cfg)
+	if target != "" {
+		targets = []string{target}
+	}
+	if len(targets) == 0 {
+		return map[string]interface{}{
+			"nudged": []string{},
+			"at":     time.Now().UTC().Format(time.RFC3339),
+			"note":   "no contexts configured for daemon monitoring",
+		}, nil
+	}
+	missing := make([]string, 0)
+	for _, ctxName := range targets {
+		ctx, err := cfg.GetContext(ctxName)
+		if err != nil {
+			s.setStatusError(ctxName, "", err.Error())
+			missing = append(missing, ctxName)
+			continue
+		}
+		s.maintainAuthForContext(cfg, ctxName, ctx, "nudge")
+	}
+	out := map[string]interface{}{
+		"nudged": targets,
+		"at":     time.Now().UTC().Format(time.RFC3339),
+	}
+	if len(missing) > 0 {
+		out["missing"] = missing
+	}
+	return out, nil
 }
 
 func toAuthStatus(st authStatusState) AuthStatus {

@@ -92,7 +92,13 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`. W
 - `oci-context delete <name>`
 - `oci-context status`
 - `oci-context export --format env|json`
-- `oci-context daemon start|stop|status`
+- `oci-context auth methods|show|set|set-user|login|refresh|validate|setup`
+- `oci-context daemon serve [--auto-refresh --validate-interval 5m --refresh-interval 15m]`
+- `oci-context daemon auth-status [--context <name>]`
+- `oci-context daemon nudge [--context <name>]`
+- `oci-context daemon monitor list|add|remove|clear`
+- `oci-context daemon launchd generate` (macOS)
+- `oci-context daemon sleepwatcher install` (macOS wake hook automation)
 - `oci-context tui`
 
 ### OCI CLI Defaults (Transparent `oci` Usage)
@@ -164,6 +170,50 @@ Errors:
 ## Integration
 - Shell: `eval $(oci-context export --format env)` sets OCI_CLI_PROFILE, OCI_TENANCY_OCID, OCI_COMPARTMENT_OCID, OCI_REGION.
 - Tools: read JSON via `oci-context export --format json` or query the socket.
+
+## Daemon Auth Monitoring
+The daemon can monitor auth for multiple contexts in the background.
+
+- Configure monitored contexts:
+
+```sh
+oci-context daemon monitor add dev prod
+oci-context daemon monitor list
+```
+
+- Clear explicit list (fallback to `current_context`):
+
+```sh
+oci-context daemon monitor clear
+```
+
+- Trigger immediate maintenance without waiting for interval:
+
+```sh
+oci-context daemon nudge
+oci-context daemon nudge --context dev
+```
+
+## macOS Background Automation
+### launchd daemon
+Generate launchd plist for persistent background run:
+
+```sh
+oci-context daemon launchd generate \
+  --binary /path/to/oci-context \
+  --config ~/.oci-context/config.yml \
+  --auto-refresh \
+  --validate-interval 5m \
+  --refresh-interval 15m
+```
+
+### sleep/wake automation with sleepwatcher
+Install wake hook automation (restarts daemon + nudges auth checks on wake):
+
+```sh
+brew install sleepwatcher
+oci-context daemon sleepwatcher install
+```
 
 ## Status
 Work in progress.

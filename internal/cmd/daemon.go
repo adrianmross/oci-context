@@ -24,8 +24,10 @@ func newDaemonCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newDaemonServeCmd())
 	cmd.AddCommand(newDaemonAuthStatusCmd())
+	cmd.AddCommand(newDaemonNudgeCmd())
 	cmd.AddCommand(newDaemonMonitorCmd())
 	cmd.AddCommand(newDaemonLaunchdCmd())
+	cmd.AddCommand(newDaemonSleepwatcherCmd())
 	return cmd
 }
 
@@ -272,6 +274,108 @@ func newDaemonLaunchdCmd() *cobra.Command {
 	return cmd
 }
 
+func newDaemonSleepwatcherCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sleepwatcher",
+		Short: "Install wake automation that nudges daemon auth checks",
+	}
+	cmd.AddCommand(newDaemonSleepwatcherInstallCmd())
+	return cmd
+}
+
+func newDaemonSleepwatcherInstallCmd() *cobra.Command {
+	var (
+		cfgPath         string
+		daemonLabel     string
+		wakeupScript    string
+		sleepwatcherPl  string
+		sleepwatcherBin string
+		ociContextBin   string
+		loadNow         bool
+	)
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Create wake hook script and launchd plist for sleepwatcher",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runtime.GOOS != "darwin" {
+				return fmt.Errorf("sleepwatcher install is only supported on macOS")
+			}
+			path, err := daemon.EnsureConfig(cfgPath)
+			if err != nil {
+				return err
+			}
+			_ = path
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			if sleepwatcherBin == "" {
+				if p, lookErr := exec.LookPath("sleepwatcher"); lookErr == nil {
+					sleepwatcherBin = p
+				}
+			}
+			if sleepwatcherBin == "" {
+				return fmt.Errorf("sleepwatcher binary not found; install with `brew install sleepwatcher` or pass --sleepwatcher-bin")
+			}
+			if ociContextBin == "" {
+				if p, lookErr := exec.LookPath("oci-context"); lookErr == nil {
+					ociContextBin = p
+				}
+			}
+			if ociContextBin == "" {
+				exe, exeErr := os.Executable()
+				if exeErr == nil {
+					ociContextBin = exe
+				}
+			}
+			if ociContextBin == "" {
+				return fmt.Errorf("could not resolve oci-context binary path; pass --oci-context-bin")
+			}
+			if wakeupScript == "" {
+				wakeupScript = filepath.Join(home, ".wakeup")
+			}
+			if sleepwatcherPl == "" {
+				sleepwatcherPl = filepath.Join(home, "Library", "LaunchAgents", "com.adrianmross.oci-context.sleepwatcher.plist")
+			}
+
+			script := renderWakeupScript(ociContextBin, daemonLabel)
+			if err := os.WriteFile(wakeupScript, []byte(script), 0o755); err != nil {
+				return err
+			}
+			plist := renderSleepwatcherPlist("com.adrianmross.oci-context.sleepwatcher", sleepwatcherBin, wakeupScript)
+			if err := os.MkdirAll(filepath.Dir(sleepwatcherPl), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(sleepwatcherPl, []byte(plist), 0o644); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote wake script: %s\n", wakeupScript)
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote launchd plist: %s\n", sleepwatcherPl)
+			if loadNow {
+				_ = exec.Command("launchctl", "unload", sleepwatcherPl).Run()
+				if out, err := exec.Command("launchctl", "load", sleepwatcherPl).CombinedOutput(); err != nil {
+					return fmt.Errorf("launchctl load failed: %v: %s", err, strings.TrimSpace(string(out)))
+				}
+				if out, err := exec.Command("launchctl", "start", "com.adrianmross.oci-context.sleepwatcher").CombinedOutput(); err != nil {
+					return fmt.Errorf("launchctl start failed: %v: %s", err, strings.TrimSpace(string(out)))
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "Loaded and started sleepwatcher launch agent.")
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "Load with:\nlaunchctl unload %s 2>/dev/null || true\nlaunchctl load %s\nlaunchctl start com.adrianmross.oci-context.sleepwatcher\n", sleepwatcherPl, sleepwatcherPl)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&daemonLabel, "daemon-label", "com.adrianmross.oci-context.daemon", "launchd label for oci-context daemon")
+	cmd.Flags().StringVar(&wakeupScript, "wakeup-script", "", "Path to write wake hook script (default ~/.wakeup)")
+	cmd.Flags().StringVar(&sleepwatcherPl, "plist", "", "Path to write sleepwatcher launchd plist")
+	cmd.Flags().StringVar(&sleepwatcherBin, "sleepwatcher-bin", "", "Absolute path to sleepwatcher binary")
+	cmd.Flags().StringVar(&ociContextBin, "oci-context-bin", "", "Absolute path to oci-context binary")
+	cmd.Flags().BoolVar(&loadNow, "load", true, "Load and start launchd agent after writing files")
+	return cmd
+}
+
 func newDaemonLaunchdGenerateCmd() *cobra.Command {
 	var cfgPath string
 	var label string
@@ -357,6 +461,50 @@ func loadDaemonConfig(cfgPath string) (config.Config, string, error) {
 	return cfg, path, nil
 }
 
+func newDaemonNudgeCmd() *cobra.Command {
+	var cfgPath string
+	var contextName string
+	cmd := &cobra.Command{
+		Use:   "nudge",
+		Short: "Trigger immediate daemon auth maintenance for monitored or selected context",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _, err := loadDaemonConfig(cfgPath)
+			if err != nil {
+				return err
+			}
+			conn, err := ipcmsg.Dial(cfg.Options.SocketPath)
+			if err != nil {
+				return fmt.Errorf("dial daemon socket %s: %w (is daemon running?)", cfg.Options.SocketPath, err)
+			}
+			defer conn.Close()
+			req := ipcmsg.Request{Method: "auth_nudge", Name: contextName}
+			if err := conn.SendRequest(req); err != nil {
+				return err
+			}
+			var resp struct {
+				OK    bool        `json:"ok"`
+				Error string      `json:"error,omitempty"`
+				Data  interface{} `json:"data,omitempty"`
+			}
+			if err := conn.ReadResponse(&resp); err != nil {
+				return err
+			}
+			if !resp.OK {
+				return errors.New(resp.Error)
+			}
+			b, err := json.MarshalIndent(resp.Data, "", "  ")
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), string(b))
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&contextName, "context", "", "Target context name (default monitored list)")
+	return cmd
+}
+
 func renderLaunchdPlist(label, binaryPath, cfgPath string, autoRefresh bool, validateInterval, refreshInterval time.Duration, stdoutPath, stderrPath string) string {
 	args := []string{
 		xmlEscape(binaryPath),
@@ -396,6 +544,45 @@ func renderLaunchdPlist(label, binaryPath, cfgPath string, autoRefresh bool, val
   </dict>
 </plist>
 `, xmlEscape(label), strings.Join(argXML, "\n"), xmlEscape(stdoutPath), xmlEscape(stderrPath))
+}
+
+func renderWakeupScript(ociContextBin, daemonLabel string) string {
+	return fmt.Sprintf(`#!/bin/zsh
+set -euo pipefail
+launchctl kickstart -k gui/$(id -u)/%s >/dev/null 2>&1 || true
+%s daemon nudge >/dev/null 2>&1 || true
+`, daemonLabel, shellQuote(ociContextBin))
+}
+
+func renderSleepwatcherPlist(label, sleepwatcherBin, wakeupScript string) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>%s</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>%s</string>
+      <string>-w</string>
+      <string>%s</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+  </dict>
+</plist>
+`, xmlEscape(label), xmlEscape(sleepwatcherBin), xmlEscape(wakeupScript))
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func xmlEscape(s string) string {
