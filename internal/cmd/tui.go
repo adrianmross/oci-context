@@ -24,7 +24,7 @@ import (
 var (
 	stagedColor      = lipgloss.Color("205")
 	currentColor     = lipgloss.Color("42")
-	selectionBgColor = lipgloss.Color("236")
+	selectionBgColor = lipgloss.Color("33")
 	infoColor        = lipgloss.Color("252")
 	accentColor      = lipgloss.Color("45")
 	activeTabColor   = lipgloss.Color("33")
