@@ -843,7 +843,7 @@ type contextItem struct {
 
 func (c contextItem) Title() string {
 	if c.isCurrent {
-		return c.Name + " @CURRENT"
+		return "@CURRENT"
 	}
 	return c.Name
 }
