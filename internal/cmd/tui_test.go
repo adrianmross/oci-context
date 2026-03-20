@@ -696,3 +696,79 @@ func TestTUIContextNavigationSkipsSectionAndSeparatorRows(t *testing.T) {
 		t.Fatalf("expected to skip separator/header back to saved context, got profile %s", selected.Name)
 	}
 }
+
+func TestTUITabCyclesMenusForward(t *testing.T) {
+	profiles := map[string]ocicfg.Profile{
+		"DEFAULT": {Tenancy: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"},
+	}
+	cfg := config.Config{
+		Options:        config.Options{OCIConfigPath: "/tmp/oci"},
+		CurrentContext: "DEFAULT",
+		Contexts: []config.Context{
+			{
+				Name:            "DEFAULT",
+				Profile:         "DEFAULT",
+				TenancyOCID:     "ocid1.tenancy.oc1..ten",
+				CompartmentOCID: "ocid1.tenancy.oc1..ten",
+				Region:          "us-phoenix-1",
+			},
+		},
+	}
+	m := newTuiModel(cfg, "", profileMenuItems(cfg, profiles, nil), profiles, "")
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	res := model.(tuiModel)
+	if res.mode != "tenancies" {
+		t.Fatalf("expected tab from contexts to go to tenancies, got %s", res.mode)
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyTab})
+	res = model.(tuiModel)
+	if res.mode != "compartments" {
+		t.Fatalf("expected tab from tenancies to go to compartments, got %s", res.mode)
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyTab})
+	res = model.(tuiModel)
+	if res.mode != "regions" {
+		t.Fatalf("expected tab from compartments to go to regions, got %s", res.mode)
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyTab})
+	res = model.(tuiModel)
+	if res.mode != "contexts" {
+		t.Fatalf("expected tab from regions to go to contexts, got %s", res.mode)
+	}
+}
+
+func TestTUIShiftTabCyclesMenusBackward(t *testing.T) {
+	profiles := map[string]ocicfg.Profile{
+		"DEFAULT": {Tenancy: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"},
+	}
+	cfg := config.Config{
+		Options:        config.Options{OCIConfigPath: "/tmp/oci"},
+		CurrentContext: "DEFAULT",
+		Contexts: []config.Context{
+			{
+				Name:            "DEFAULT",
+				Profile:         "DEFAULT",
+				TenancyOCID:     "ocid1.tenancy.oc1..ten",
+				CompartmentOCID: "ocid1.tenancy.oc1..ten",
+				Region:          "us-phoenix-1",
+			},
+		},
+	}
+	m := newTuiModel(cfg, "", profileMenuItems(cfg, profiles, nil), profiles, "")
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	res := model.(tuiModel)
+	if res.mode != "regions" {
+		t.Fatalf("expected shift+tab from contexts to go to regions, got %s", res.mode)
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	res = model.(tuiModel)
+	if res.mode != "compartments" {
+		t.Fatalf("expected shift+tab from regions to go to compartments, got %s", res.mode)
+	}
+}

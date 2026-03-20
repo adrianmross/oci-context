@@ -1266,6 +1266,99 @@ func (m tuiModel) goUpOne() (tea.Model, tea.Cmd) {
 	return m, m.loadCompsCmd(m.parentID)
 }
 
+func (m tuiModel) ensureActiveContext() (tuiModel, bool) {
+	if m.ctxItem != (contextItem{}) {
+		return m, true
+	}
+	if item, ok := m.list.SelectedItem().(contextItem); ok {
+		m.ctxItem = item
+		return m, true
+	}
+	if ctx, ok := selectInitialContext(m.list.Items(), m.cfg.CurrentContext); ok {
+		m.ctxItem = ctx
+		return m, true
+	}
+	return m, false
+}
+
+func (m tuiModel) switchToMenu(target string) (tuiModel, tea.Cmd, bool) {
+	switch target {
+	case "contexts":
+		m.mode = "contexts"
+		m.status = ""
+		m.crumb = ""
+		return m, nil, true
+	case "tenancies":
+		if len(m.tenancies.Items()) == 0 {
+			return m, nil, false
+		}
+		m.mode = "tenancies"
+		m.status = "Select tenancy (Enter to use a profile and open root)"
+		return m, nil, true
+	case "compartments":
+		var ok bool
+		m, ok = m.ensureActiveContext()
+		if !ok {
+			return m, nil, false
+		}
+		parent := m.ctxItem.CompartmentOCID
+		if parent == "" {
+			parent = m.ctxItem.TenancyOCID
+		}
+		m.parentMap = make(map[string]string)
+		m.nameMap = make(map[string]string)
+		m.parentID = parent
+		m.parentCrumb = parentLabel(parent, m.ctxItem)
+		m.parentMap[parent] = m.ctxItem.TenancyOCID
+		m.nameMap[parent] = m.parentCrumb
+		m.nameMap[m.ctxItem.TenancyOCID] = parentLabel(m.ctxItem.TenancyOCID, m.ctxItem)
+		m.mode = "compartments"
+		m.status = "Loading compartments..."
+		m.crumb = fmt.Sprintf("Current: %s (%s)", m.parentCrumb, parent)
+		return m, m.loadCompsCmd(parent), true
+	case "regions":
+		var ok bool
+		m, ok = m.ensureActiveContext()
+		if !ok {
+			return m, nil, false
+		}
+		m.mode = "regions"
+		m.status = "Loading regions..."
+		if cached, exists := m.regionCache[m.ctxItem.Name]; exists {
+			m.regions.SetItems(toRegionList(cached))
+			m.regions.Select(0)
+			m.status = "Select region (Space to stage, Ctrl+S to save)"
+			return m, nil, true
+		}
+		return m, m.loadRegionsCmd(m.ctxItem), true
+	default:
+		return m, nil, false
+	}
+}
+
+func (m tuiModel) cycleMenu(forward bool) (tea.Model, tea.Cmd) {
+	order := []string{"contexts", "tenancies", "compartments", "regions"}
+	cur := 0
+	for i, mode := range order {
+		if mode == m.mode {
+			cur = i
+			break
+		}
+	}
+	for step := 1; step <= len(order); step++ {
+		next := (cur + step) % len(order)
+		if !forward {
+			next = (cur - step + len(order)) % len(order)
+		}
+		nextMode := order[next]
+		nm, cmd, ok := m.switchToMenu(nextMode)
+		if ok {
+			return nm, cmd
+		}
+	}
+	return m, nil
+}
+
 func (m tuiModel) Init() tea.Cmd {
 	return m.initCmd
 }
@@ -1291,6 +1384,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "tab":
+			return m.cycleMenu(true)
+		case "shift+tab":
+			return m.cycleMenu(false)
 		case "enter", "right":
 			if m.activeListFilterState() == list.FilterApplied {
 				// Don't drill on enter while a filter is applied; use '/' to edit filter or Esc to clear.
