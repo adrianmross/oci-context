@@ -2649,13 +2649,13 @@ func (m tuiModel) renderHelpPanel() string {
 		"?: toggle this help panel",
 		"",
 		"Mode Navigation",
-		"contexts: r regions • c compartments • t tenancies",
+		"profiles: r regions • c compartments • t tenancies",
 		"submenus: R regions • C compartments • T tenancies • P profiles",
 	}
 	if m.width > 0 && m.width < 72 {
 		lines = []string{
 			"Keys: enter drill, space stage, q save, esc quit, / filter, ? help",
-			"Switch: r/c/t in contexts, R/C/T/P in submenus",
+			"Switch: r/c/t in profiles, R/C/T/P in submenus",
 		}
 	}
 	return strings.Join(lines, "\n")
