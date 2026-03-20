@@ -577,17 +577,31 @@ func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, pro
 }
 
 func isContextEquivalentToProfile(c config.Context, profiles map[string]ocicfg.Profile) bool {
-	if c.Profile == "" {
-		return false
+	profileName := c.Profile
+	if profileName == "" {
+		// Legacy contexts may omit profile but keep the context name identical to profile.
+		profileName = c.Name
 	}
-	p, ok := profiles[c.Profile]
+	p, ok := profiles[profileName]
 	if !ok {
 		return false
 	}
-	expectedCompartment := p.Tenancy
-	return c.TenancyOCID == p.Tenancy &&
-		c.Region == p.Region &&
-		c.CompartmentOCID == expectedCompartment
+	tenancy := c.TenancyOCID
+	if tenancy == "" {
+		tenancy = p.Tenancy
+	}
+	region := c.Region
+	if region == "" {
+		region = p.Region
+	}
+	compartment := c.CompartmentOCID
+	if compartment == "" {
+		// Empty compartment in context means root/tenancy in this app.
+		compartment = tenancy
+	}
+	return tenancy == p.Tenancy &&
+		region == p.Region &&
+		compartment == p.Tenancy
 }
 
 // tenanciesFromProfiles groups profiles by tenancy OCID into tenancy items.

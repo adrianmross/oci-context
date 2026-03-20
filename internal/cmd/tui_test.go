@@ -502,3 +502,35 @@ func TestProfileMenuItemsHidesContextDuplicatesOfProfiles(t *testing.T) {
 		t.Fatalf("expected differing context to remain visible, got %q", got)
 	}
 }
+
+func TestProfileMenuItemsHidesLegacyEquivalentContexts(t *testing.T) {
+	profiles := map[string]ocicfg.Profile{
+		"DEFAULT": {
+			Tenancy: "ocid1.tenancy.oc1..ten",
+			Region:  "us-phoenix-1",
+			User:    "ocid1.user.oc1..u",
+		},
+	}
+	cfg := config.Config{
+		Options: config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{
+			{
+				Name:            "DEFAULT",
+				Profile:         "", // legacy missing profile field
+				TenancyOCID:     "", // legacy missing tenancy
+				CompartmentOCID: "", // legacy implicit root
+				Region:          "", // legacy missing region
+			},
+		},
+	}
+
+	items := profileMenuItems(cfg, profiles, nil)
+	var titles []string
+	for _, it := range items {
+		titles = append(titles, itemTitle(it))
+	}
+	got := strings.Join(titles, " | ")
+	if strings.Contains(got, "CONTEXTS") {
+		t.Fatalf("expected legacy equivalent context to be hidden, got %q", got)
+	}
+}
