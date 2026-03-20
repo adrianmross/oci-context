@@ -910,6 +910,23 @@ func TestTUIViewShowsGhostFilterHintWhenUnfiltered(t *testing.T) {
 	}
 }
 
+func TestTUIViewHidesBuiltinFilterPromptWhenUnfiltered(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "contexts"
+	// Simulate stale internal show-filter state; renderer should still hide it while unfiltered.
+	m.list.SetShowFilter(true)
+
+	view := m.View()
+	if strings.Count(view, "Filter:") != 1 {
+		t.Fatalf("expected only ghost filter hint when unfiltered, got view=%q", view)
+	}
+}
+
 func TestTUIEnterDrillsWithMarkedCompItem(t *testing.T) {
 	ci := newTestContextItem()
 	cfg := config.Config{

@@ -2022,13 +2022,37 @@ func (m tuiModel) activeListView() string {
 	}
 	switch m.mode {
 	case "contexts":
-		return m.list.View()
+		l := m.list
+		if l.FilterState() == list.Unfiltered {
+			l.SetShowFilter(false)
+		} else {
+			l.SetShowFilter(true)
+		}
+		return l.View()
 	case "tenancies":
-		return m.tenancies.View()
+		l := m.tenancies
+		if l.FilterState() == list.Unfiltered {
+			l.SetShowFilter(false)
+		} else {
+			l.SetShowFilter(true)
+		}
+		return l.View()
 	case "regions":
-		return m.regions.View()
+		l := m.regions
+		if l.FilterState() == list.Unfiltered {
+			l.SetShowFilter(false)
+		} else {
+			l.SetShowFilter(true)
+		}
+		return l.View()
 	default:
-		return m.comps.View()
+		l := m.comps
+		if l.FilterState() == list.Unfiltered {
+			l.SetShowFilter(false)
+		} else {
+			l.SetShowFilter(true)
+		}
+		return l.View()
 	}
 }
 
