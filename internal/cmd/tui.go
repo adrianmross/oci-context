@@ -623,20 +623,32 @@ func contextSignature(c config.Context) string {
 }
 
 func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, profilesErr error) []list.Item {
+	return profileMenuItemsForDensity(cfg, profiles, profilesErr, true)
+}
+
+func profileMenuItemsForDensity(cfg config.Config, profiles map[string]ocicfg.Profile, profilesErr error, showSections bool) []list.Item {
 	current, hasCurrent := cfg.GetContext(cfg.CurrentContext)
 	profileItems := contextsFromProfiles(profiles, current, hasCurrent == nil)
 	contextItems := contextsFromConfig(cfg, profiles)
 	items := make([]list.Item, 0, len(profileItems)+len(contextItems)+4)
 
-	if len(contextItems) > 0 {
-		items = append(items, sectionItem{title: "CONTEXTS"})
-		items = append(items, contextItems...)
-	}
-	if len(profileItems) > 0 {
+	if showSections {
 		if len(contextItems) > 0 {
+			items = append(items, sectionItem{title: "CONTEXTS"})
+			items = append(items, contextItems...)
+		}
+		if len(profileItems) > 0 {
+			if len(contextItems) > 0 {
+				items = append(items, separatorItem{})
+			}
+			items = append(items, sectionItem{title: "PROFILES"})
+			items = append(items, profileItems...)
+		}
+	} else {
+		items = append(items, contextItems...)
+		if len(contextItems) > 0 && len(profileItems) > 0 {
 			items = append(items, separatorItem{})
 		}
-		items = append(items, sectionItem{title: "PROFILES"})
 		items = append(items, profileItems...)
 	}
 	if len(items) > 0 {
@@ -647,6 +659,40 @@ func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, pro
 		return []list.Item{}
 	}
 	return profileItems
+}
+
+func (m *tuiModel) refreshContextMenuItems() {
+	if !m.managedContextMenu {
+		return
+	}
+	showSections := m.isModeVerbose("contexts")
+	items := profileMenuItemsForDensity(m.cfg, m.profiles, nil, showSections)
+	if len(items) == 0 {
+		m.list.SetItems(items)
+		return
+	}
+	selectedName := ""
+	if selected, ok := m.list.SelectedItem().(contextItem); ok {
+		selectedName = selected.Name
+	}
+	m.list.SetItems(items)
+	if selectedName == "" {
+		selectedName = m.cfg.CurrentContext
+	}
+	if selectedName != "" {
+		for i, it := range items {
+			if ci, ok := it.(contextItem); ok && ci.Name == selectedName {
+				m.list.Select(i)
+				return
+			}
+		}
+	}
+	for i, it := range items {
+		if _, ok := it.(contextItem); ok {
+			m.list.Select(i)
+			return
+		}
+	}
 }
 
 func isContextEquivalentToProfile(c config.Context, profiles map[string]ocicfg.Profile) bool {
@@ -974,6 +1020,7 @@ type tuiModel struct {
 	width              int
 	height             int
 	panelInnerHeight   int
+	managedContextMenu bool
 }
 
 func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles map[string]ocicfg.Profile, startMode string) tuiModel {
@@ -1062,7 +1109,18 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 		width:       defaultWidth,
 		height:      defaultHeight,
 	}
+	for _, it := range items {
+		if _, ok := it.(sectionItem); ok {
+			m.managedContextMenu = true
+			break
+		}
+		if _, ok := it.(separatorItem); ok {
+			m.managedContextMenu = true
+			break
+		}
+	}
 	m.refreshDelegates()
+	m.refreshContextMenuItems()
 	m.applyStartMode(startMode)
 	m.resizeListsForViewport()
 	return m
@@ -1590,6 +1648,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.layoutOverride == "matrix" || m.shouldUseGridLayout() {
 				m.setModeVerbose(m.mode, true)
 				m.layoutOverride = "list"
+				if m.mode == "contexts" {
+					m.refreshContextMenuItems()
+				}
 				m.refreshDelegates()
 				m.resizeListsForViewport()
 				m.status = fmt.Sprintf("Verbose ON for %s (list)", m.mode)
@@ -1597,6 +1658,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			next := !m.isModeVerbose(m.mode)
 			m.setModeVerbose(m.mode, next)
+			if m.mode == "contexts" {
+				m.refreshContextMenuItems()
+			}
 			m.refreshDelegates()
 			m.resizeListsForViewport()
 			m.status = fmt.Sprintf("Verbose %s for %s (session)", onOff(next), m.mode)
@@ -1608,6 +1672,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.layoutOverride = "matrix"
 				m.setModeVerbose(m.mode, false)
+				if m.mode == "contexts" {
+					m.refreshContextMenuItems()
+				}
 				m.refreshDelegates()
 				m.resizeListsForViewport()
 				m.status = "Layout matrix + verbose OFF (session)"
