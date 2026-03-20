@@ -1076,6 +1076,18 @@ func (r regionItem) Title() string       { return r.name }
 func (r regionItem) Description() string { return r.name }
 func (r regionItem) FilterValue() string { return r.name }
 
+func asCompItem(item list.Item) (compItem, bool) {
+	switch it := item.(type) {
+	case compItem:
+		return it, true
+	case markedItem:
+		if base, ok := it.base.(compItem); ok {
+			return base, true
+		}
+	}
+	return compItem{}, false
+}
+
 type tuiModel struct {
 	list               list.Model
 	tenancies          list.Model
@@ -1570,7 +1582,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.comps.Items()) == 0 {
 					return m.finalizeSelection()
 				}
-				if item, ok := m.comps.SelectedItem().(compItem); ok {
+				if item, ok := asCompItem(m.comps.SelectedItem()); ok {
 					m.parentID = item.oc.ID
 					m.parentCrumb = item.oc.Name
 					m.nameMap[item.oc.ID] = item.oc.Name
@@ -1644,7 +1656,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.mode == "compartments" {
-				if item, ok := m.comps.SelectedItem().(compItem); ok {
+				if item, ok := asCompItem(m.comps.SelectedItem()); ok {
 					if m.pendingSelectionID == item.oc.ID {
 						m.pendingSelectionID = ""
 						m.pendingSelectionNm = ""

@@ -893,3 +893,23 @@ func TestTUIRenderTabsShowsStagedDotPerMenu(t *testing.T) {
 		t.Fatalf("expected staged dot in tab bar, got %q", tabs)
 	}
 }
+
+func TestTUIEnterDrillsWithMarkedCompItem(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "compartments"
+	m.ctxItem = ci
+	child := compItem{oc: oci.Compartment{ID: "ocid1.compartment.oc1..child", Name: "child", Parent: ci.TenancyOCID, Status: "ACTIVE"}}
+	m.comps.SetItems([]list.Item{markedItem{base: child, title: child.Title(), description: child.Description()}})
+	m.comps.Select(0)
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	res := model.(tuiModel)
+	if res.parentID != child.oc.ID {
+		t.Fatalf("expected to drill to child compartment %q, got %q", child.oc.ID, res.parentID)
+	}
+}
