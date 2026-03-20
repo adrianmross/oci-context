@@ -6,7 +6,9 @@ import (
 	"os/exec"
 	"strings"
 
+	daemonpkg "github.com/adrianmross/oci-context/internal/daemon"
 	"github.com/adrianmross/oci-context/pkg/config"
+	ipcmsg "github.com/adrianmross/oci-context/pkg/ipc"
 	"github.com/spf13/cobra"
 )
 
@@ -149,6 +151,30 @@ func buildAuthValidateOCIArgs(ctx config.Context, ociConfigPath string) []string
 	return args
 }
 
+func fetchDaemonAuthStatus(cfg config.Config, contextName string) (daemonpkg.AuthStatus, error) {
+	conn, err := ipcmsg.Dial(cfg.Options.SocketPath)
+	if err != nil {
+		return daemonpkg.AuthStatus{}, err
+	}
+	defer conn.Close()
+	req := ipcmsg.Request{Method: "auth_status", Name: contextName}
+	if err := conn.SendRequest(req); err != nil {
+		return daemonpkg.AuthStatus{}, err
+	}
+	var resp struct {
+		OK    bool                 `json:"ok"`
+		Error string               `json:"error,omitempty"`
+		Data  daemonpkg.AuthStatus `json:"data,omitempty"`
+	}
+	if err := conn.ReadResponse(&resp); err != nil {
+		return daemonpkg.AuthStatus{}, err
+	}
+	if !resp.OK {
+		return daemonpkg.AuthStatus{}, fmt.Errorf("%s", resp.Error)
+	}
+	return resp.Data, nil
+}
+
 func newAuthCmd() *cobra.Command {
 	var cfgPath string
 	var useGlobal bool
@@ -234,6 +260,21 @@ func newAuthCmd() *cobra.Command {
 			}
 			if cap.SetupHint != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "setup_hint: %s\n", cap.SetupHint)
+			}
+			if st, err := fetchDaemonAuthStatus(cfg, name); err == nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "daemon_mode: %s\n", st.Mode)
+				if st.LastValidatedAt != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "daemon_last_validate: %s (ok=%t)\n", st.LastValidatedAt, st.LastValidateOK)
+				}
+				if st.LastRefreshedAt != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "daemon_last_refresh: %s (ok=%t)\n", st.LastRefreshedAt, st.LastRefreshOK)
+				}
+				if st.HomeRegionName != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "daemon_home_region: %s (%s) status=%s\n", st.HomeRegionName, st.HomeRegionKey, st.HomeRegionStatus)
+				}
+				if st.LastError != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "daemon_last_error: %s\n", st.LastError)
+				}
 			}
 			return nil
 		},
