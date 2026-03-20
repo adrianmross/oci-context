@@ -1647,10 +1647,10 @@ func (m tuiModel) effectiveGridLayout() bool {
 }
 
 func (m tuiModel) gridAllowedInCurrentState() bool {
-	if m.ultraCompact || m.helpVisible || m.width < 96 || m.isFilteringActive() {
+	if m.ultraCompact || m.helpVisible || m.width < 96 || m.activeListFilterState() == list.Filtering {
 		return false
 	}
-	return len(m.activeListModel().Items()) > 0
+	return len(m.activeGridItems()) > 0
 }
 
 func (m tuiModel) gridColumnsForCount(count int) int {
@@ -1672,6 +1672,7 @@ func (m tuiModel) gridColumnsForCount(count int) int {
 }
 
 func (m *tuiModel) moveActiveSelectionGrid(key string) bool {
+	items := m.activeGridItems()
 	var delta int
 	switch key {
 	case "left", "h":
@@ -1679,15 +1680,14 @@ func (m *tuiModel) moveActiveSelectionGrid(key string) bool {
 	case "right", "l":
 		delta = 1
 	case "up", "k":
-		delta = -m.gridColumnsForCount(len(m.activeListModel().Items()))
+		delta = -m.gridColumnsForCount(len(items))
 	case "down", "j":
-		delta = m.gridColumnsForCount(len(m.activeListModel().Items()))
+		delta = m.gridColumnsForCount(len(items))
 	default:
 		return false
 	}
 
 	l := m.activeListModel()
-	items := l.Items()
 	if len(items) == 0 {
 		return false
 	}
@@ -1703,7 +1703,7 @@ func (m *tuiModel) moveActiveSelectionGrid(key string) bool {
 
 func (m tuiModel) renderActiveGrid() string {
 	l := m.activeListModel()
-	items := l.Items()
+	items := m.activeGridItems()
 	if len(items) == 0 {
 		return ""
 	}
@@ -1773,6 +1773,14 @@ func (m tuiModel) renderActiveGrid() string {
 		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, cells...))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) activeGridItems() []list.Item {
+	l := m.activeListModel()
+	if m.activeListFilterState() == list.FilterApplied {
+		return l.VisibleItems()
+	}
+	return l.Items()
 }
 
 func (m tuiModel) isStagedItem(item list.Item) bool {
