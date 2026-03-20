@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"testing"
+	"time"
 
 	"github.com/adrianmross/oci-context/pkg/config"
 )
@@ -70,4 +71,35 @@ func containsArg(args []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestBackoffDurationGrowthAndCap(t *testing.T) {
+	if got := backoffDuration(1); got != backoffBase {
+		t.Fatalf("expected first backoff %s, got %s", backoffBase, got)
+	}
+	if got := backoffDuration(2); got != backoffBase*2 {
+		t.Fatalf("expected second backoff %s, got %s", backoffBase*2, got)
+	}
+	if got := backoffDuration(100); got != backoffMax {
+		t.Fatalf("expected capped backoff %s, got %s", backoffMax, got)
+	}
+}
+
+func TestAllowAttemptBlockedAfterFailure(t *testing.T) {
+	svc := &Service{backoff: make(map[string]backoffState)}
+	svc.recordFailure("ctx", "refresh", "boom")
+	ok, _ := svc.allowAttempt("ctx", "refresh")
+	if ok {
+		t.Fatalf("expected allowAttempt to be false during backoff window")
+	}
+	// force expiration and ensure allowAttempt returns true
+	svc.backoffMu.Lock()
+	st := svc.backoff["ctx:refresh"]
+	st.NextTry = time.Now().Add(-time.Second)
+	svc.backoff["ctx:refresh"] = st
+	svc.backoffMu.Unlock()
+	ok, _ = svc.allowAttempt("ctx", "refresh")
+	if !ok {
+		t.Fatalf("expected allowAttempt to be true after backoff window")
+	}
 }

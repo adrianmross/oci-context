@@ -1,11 +1,13 @@
 package daemon
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,7 +78,22 @@ type Service struct {
 
 	statusMu sync.RWMutex
 	status   map[string]authStatusState
+
+	backoffMu sync.Mutex
+	backoff   map[string]backoffState
 }
+
+type backoffState struct {
+	Failures int
+	NextTry  time.Time
+	LastLog  time.Time
+}
+
+const (
+	backoffBase        = 15 * time.Second
+	backoffMax         = 10 * time.Minute
+	backoffLogInterval = 1 * time.Minute
+)
 
 // NewService loads config and returns a Service.
 func NewService(cfgPath string) (*Service, error) {
@@ -95,7 +112,13 @@ func NewServiceWithOptions(cfgPath string, opts ServiceOptions) (*Service, error
 	if opts.RefreshInterval <= 0 {
 		opts.RefreshInterval = 15 * time.Minute
 	}
-	return &Service{cfgPath: cfgPath, cfg: cfg, opts: opts, status: make(map[string]authStatusState)}, nil
+	return &Service{
+		cfgPath: cfgPath,
+		cfg:     cfg,
+		opts:    opts,
+		status:  make(map[string]authStatusState),
+		backoff: make(map[string]backoffState),
+	}, nil
 }
 
 // Serve runs the IPC server.
@@ -364,8 +387,12 @@ func (s *Service) setStatusError(ctxName, method, msg string) {
 }
 
 func (s *Service) validateCurrentContext(cfg config.Config, ctxName string, ctx config.Context, reason string) error {
+	if ok, wait := s.allowAttempt(ctxName, "validate"); !ok {
+		s.setStatusError(ctxName, config.NormalizeAuthMethod(ctx.AuthMethod), fmt.Sprintf("validate backoff active (next attempt %s)", wait.UTC().Format(time.RFC3339)))
+		return fmt.Errorf("validate backoff active")
+	}
 	args := buildValidateOCIArgs(ctx, cfg.Options.OCIConfigPath)
-	out, err := runOCICapture(args)
+	out, stderr, err := runOCICapture(args)
 	now := time.Now()
 
 	s.statusMu.Lock()
@@ -377,8 +404,12 @@ func (s *Service) validateCurrentContext(cfg config.Config, ctxName string, ctx 
 	if err != nil {
 		st.LastValidateOK = false
 		st.LastError = fmt.Sprintf("%s validate failed: %v", reason, err)
+		if stderr != "" {
+			st.LastError += ": " + stderr
+		}
 		s.status[ctxName] = st
 		s.statusMu.Unlock()
+		s.recordFailure(ctxName, "validate", st.LastError)
 		return err
 	}
 
@@ -388,6 +419,7 @@ func (s *Service) validateCurrentContext(cfg config.Config, ctxName string, ctx 
 		st.LastError = fmt.Sprintf("%s validate parse failed: %v", reason, parseErr)
 		s.status[ctxName] = st
 		s.statusMu.Unlock()
+		s.recordFailure(ctxName, "validate", st.LastError)
 		return parseErr
 	}
 	st.HomeRegionName = home.RegionName
@@ -397,12 +429,17 @@ func (s *Service) validateCurrentContext(cfg config.Config, ctxName string, ctx 
 	st.LastError = ""
 	s.status[ctxName] = st
 	s.statusMu.Unlock()
+	s.recordSuccess(ctxName, "validate")
 	return nil
 }
 
 func (s *Service) refreshSecurityToken(cfg config.Config, ctxName string, ctx config.Context, reason string) {
+	if ok, wait := s.allowAttempt(ctxName, "refresh"); !ok {
+		s.setStatusError(ctxName, config.NormalizeAuthMethod(ctx.AuthMethod), fmt.Sprintf("refresh backoff active (next attempt %s)", wait.UTC().Format(time.RFC3339)))
+		return
+	}
 	args := buildRefreshOCIArgs(ctx, cfg.Options.OCIConfigPath)
-	err := runOCI(args)
+	stderr, err := runOCI(args)
 	now := time.Now()
 
 	s.statusMu.Lock()
@@ -415,11 +452,19 @@ func (s *Service) refreshSecurityToken(cfg config.Config, ctxName string, ctx co
 	if err != nil {
 		st.LastRefreshOK = false
 		st.LastError = fmt.Sprintf("%s refresh failed: %v", reason, err)
+		if stderr != "" {
+			st.LastError += ": " + stderr
+		}
 	} else {
 		st.LastRefreshOK = true
 		st.LastError = ""
 	}
 	s.status[ctxName] = st
+	if err != nil {
+		s.recordFailure(ctxName, "refresh", st.LastError)
+		return
+	}
+	s.recordSuccess(ctxName, "refresh")
 }
 
 type regionSubscriptionList struct {
@@ -482,30 +527,88 @@ func buildRefreshOCIArgs(ctx config.Context, ociConfigPath string) []string {
 	return args
 }
 
-func runOCICapture(args []string) ([]byte, error) {
+func runOCICapture(args []string) ([]byte, string, error) {
 	cmd := exec.Command("oci", args...)
-	cmd.Stderr = os.Stderr
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.Error); ok && ee.Err != nil {
-			return nil, fmt.Errorf("failed to execute oci CLI (%w): install with `pip install oci-cli` or ensure it is in PATH", ee.Err)
+			return nil, strings.TrimSpace(stderr.String()), fmt.Errorf("failed to execute oci CLI (%w): install with `pip install oci-cli` or ensure it is in PATH", ee.Err)
 		}
-		return nil, err
+		return nil, strings.TrimSpace(stderr.String()), err
 	}
-	return out, nil
+	return out, strings.TrimSpace(stderr.String()), nil
 }
 
-func runOCI(args []string) error {
+func runOCI(args []string) (string, error) {
 	cmd := exec.Command("oci", args...)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = &bytes.Buffer{}
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.Error); ok && ee.Err != nil {
-			return fmt.Errorf("failed to execute oci CLI (%w): install with `pip install oci-cli` or ensure it is in PATH", ee.Err)
+			return strings.TrimSpace(stderr.String()), fmt.Errorf("failed to execute oci CLI (%w): install with `pip install oci-cli` or ensure it is in PATH", ee.Err)
 		}
-		return err
+		return strings.TrimSpace(stderr.String()), err
 	}
-	return nil
+	return strings.TrimSpace(stderr.String()), nil
+}
+
+func (s *Service) allowAttempt(ctxName, op string) (bool, time.Time) {
+	key := ctxName + ":" + op
+	now := time.Now()
+	s.backoffMu.Lock()
+	defer s.backoffMu.Unlock()
+	st := s.backoff[key]
+	if !st.NextTry.IsZero() && now.Before(st.NextTry) {
+		return false, st.NextTry
+	}
+	return true, time.Time{}
+}
+
+func (s *Service) recordSuccess(ctxName, op string) {
+	key := ctxName + ":" + op
+	s.backoffMu.Lock()
+	delete(s.backoff, key)
+	s.backoffMu.Unlock()
+}
+
+func (s *Service) recordFailure(ctxName, op, detail string) {
+	key := ctxName + ":" + op
+	now := time.Now()
+	s.backoffMu.Lock()
+	st := s.backoff[key]
+	st.Failures++
+	wait := backoffDuration(st.Failures)
+	st.NextTry = now.Add(wait)
+	logNow := st.LastLog.IsZero() || now.Sub(st.LastLog) >= backoffLogInterval
+	if logNow {
+		st.LastLog = now
+	}
+	s.backoff[key] = st
+	s.backoffMu.Unlock()
+
+	if logNow {
+		fmt.Fprintf(os.Stderr, "oci-context daemon: %s %s failure #%d; next attempt in %s (%s)\n", ctxName, op, st.Failures, wait, detail)
+	}
+}
+
+func backoffDuration(failures int) time.Duration {
+	if failures <= 1 {
+		return backoffBase
+	}
+	d := backoffBase
+	for i := 1; i < failures; i++ {
+		d *= 2
+		if d >= backoffMax {
+			return backoffMax
+		}
+	}
+	if d > backoffMax {
+		return backoffMax
+	}
+	return d
 }
 
 // EnsureConfig ensures config exists at path.
