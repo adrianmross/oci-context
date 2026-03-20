@@ -796,6 +796,9 @@ func TestTUIFilterPlaceholderHintIsSet(t *testing.T) {
 	if m.list.ShowFilter() || m.tenancies.ShowFilter() || m.comps.ShowFilter() || m.regions.ShowFilter() {
 		t.Fatalf("expected filter bars hidden by default when unfiltered")
 	}
+	if m.list.ShowTitle() || m.tenancies.ShowTitle() || m.comps.ShowTitle() || m.regions.ShowTitle() {
+		t.Fatalf("expected list titles hidden to avoid empty chrome rows")
+	}
 }
 
 func TestWithCurrentMarkerAddsLabel(t *testing.T) {

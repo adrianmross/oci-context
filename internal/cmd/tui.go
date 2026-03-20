@@ -1129,6 +1129,7 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	l.SetFilteringEnabled(true)
 	l.FilterInput.Placeholder = filterPlaceholderHint
 	l.SetShowFilter(false)
+	l.SetShowTitle(false)
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	tn := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
@@ -1136,6 +1137,7 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	tn.SetFilteringEnabled(true)
 	tn.FilterInput.Placeholder = filterPlaceholderHint
 	tn.SetShowFilter(false)
+	tn.SetShowTitle(false)
 	tn.SetShowHelp(false)
 	tn.SetShowStatusBar(false)
 	if len(profiles) > 0 {
@@ -1166,6 +1168,7 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	cl.SetFilteringEnabled(true)
 	cl.FilterInput.Placeholder = filterPlaceholderHint
 	cl.SetShowFilter(false)
+	cl.SetShowTitle(false)
 	cl.SetShowHelp(false)
 	cl.SetShowStatusBar(false)
 	// delegate with pending highlight is attached after model creation
@@ -1174,6 +1177,7 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	rl.SetFilteringEnabled(true)
 	rl.FilterInput.Placeholder = filterPlaceholderHint
 	rl.SetShowFilter(false)
+	rl.SetShowTitle(false)
 	rl.SetShowHelp(false)
 	rl.SetShowStatusBar(false)
 	m := tuiModel{
