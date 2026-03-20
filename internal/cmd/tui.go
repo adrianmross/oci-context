@@ -556,10 +556,29 @@ func contextsFromProfiles(profiles map[string]ocicfg.Profile) []list.Item {
 func contextsFromConfig(cfg config.Config, profiles map[string]ocicfg.Profile) []list.Item {
 	names := make([]string, 0, len(cfg.Contexts))
 	byName := make(map[string]config.Context, len(cfg.Contexts))
+	seenBySignature := make(map[string]string) // signature -> kept context name
 	for _, c := range cfg.Contexts {
 		if isContextEquivalentToProfile(c, profiles) {
 			// Hide contexts that are effectively identical to an OCI profile baseline.
 			continue
+		}
+		sig := contextSignature(c)
+		if keptName, exists := seenBySignature[sig]; exists {
+			// Prefer current context when two saved contexts are equivalent by effective values.
+			if c.Name == cfg.CurrentContext {
+				delete(byName, keptName)
+				for i, n := range names {
+					if n == keptName {
+						names = append(names[:i], names[i+1:]...)
+						break
+					}
+				}
+				seenBySignature[sig] = c.Name
+			} else {
+				continue
+			}
+		} else {
+			seenBySignature[sig] = c.Name
 		}
 		names = append(names, c.Name)
 		byName[c.Name] = c
@@ -578,6 +597,15 @@ func contextsFromConfig(cfg config.Config, profiles map[string]ocicfg.Profile) [
 		items = append(items, contextItem{Context: byName[name], fromSaved: true})
 	}
 	return items
+}
+
+func contextSignature(c config.Context) string {
+	return strings.Join([]string{
+		c.Profile,
+		c.TenancyOCID,
+		c.CompartmentOCID,
+		c.Region,
+	}, "|")
 }
 
 func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, profilesErr error) []list.Item {

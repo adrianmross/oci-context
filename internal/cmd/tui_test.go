@@ -565,3 +565,43 @@ func TestProfileMenuItemsShowsContextsFirstAndCurrentFirst(t *testing.T) {
 		t.Fatalf("expected current context first, got %s", firstContext.Name)
 	}
 }
+
+func TestProfileMenuItemsDedupesEquivalentSavedContextsKeepingCurrent(t *testing.T) {
+	profiles := map[string]ocicfg.Profile{
+		"DEFAULT": {Tenancy: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"},
+	}
+	cfg := config.Config{
+		Options:        config.Options{OCIConfigPath: "/tmp/oci"},
+		CurrentContext: "DEFAULT@us-phoenix-1/ocid1.…bbbbbb",
+		Contexts: []config.Context{
+			{
+				Name:            "DEFAULT",
+				Profile:         "DEFAULT",
+				TenancyOCID:     "ocid1.tenancy.oc1..ten",
+				CompartmentOCID: "ocid1.compartment.oc1..bbbbbb",
+				Region:          "us-phoenix-1",
+			},
+			{
+				Name:            "DEFAULT@us-phoenix-1/ocid1.…bbbbbb",
+				Profile:         "DEFAULT",
+				TenancyOCID:     "ocid1.tenancy.oc1..ten",
+				CompartmentOCID: "ocid1.compartment.oc1..bbbbbb",
+				Region:          "us-phoenix-1",
+			},
+		},
+	}
+
+	items := profileMenuItems(cfg, profiles, nil)
+	var savedNames []string
+	for _, it := range items {
+		if ci, ok := it.(contextItem); ok && ci.fromSaved {
+			savedNames = append(savedNames, ci.Name)
+		}
+	}
+	if len(savedNames) != 1 {
+		t.Fatalf("expected one deduped saved context, got %v", savedNames)
+	}
+	if savedNames[0] != cfg.CurrentContext {
+		t.Fatalf("expected current context to be retained, got %v", savedNames)
+	}
+}
