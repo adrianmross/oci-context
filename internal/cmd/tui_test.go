@@ -201,8 +201,8 @@ func TestTUIViewShowsCompactMetaLine(t *testing.T) {
 	m.pendingContextName = ci.Name
 
 	view := m.View()
-	if !strings.Contains(view, "mode:contexts") {
-		t.Fatalf("expected compact meta line to include mode, got: %s", view)
+	if !strings.Contains(view, "state current:dev") {
+		t.Fatalf("expected compact meta line to include current context state, got: %s", view)
 	}
 	if !strings.Contains(view, "staged:ctx:dev") {
 		t.Fatalf("expected compact meta line to include staged context, got: %s", view)

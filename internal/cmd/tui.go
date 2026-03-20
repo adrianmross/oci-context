@@ -2618,7 +2618,7 @@ func inlineStateSummary(m tuiModel) string {
 	if m.isModeVerbose(m.mode) {
 		detail = "verbose"
 	}
-	return fmt.Sprintf("mode:%s | current:%s | layout:%s | detail:%s", displayModeName(m.mode), current, layout, detail)
+	return fmt.Sprintf("current:%s | layout:%s | detail:%s", current, layout, detail)
 }
 
 func displayModeName(mode string) string {
@@ -2694,7 +2694,7 @@ func compactMetaNarrow(m tuiModel) string {
 	if current == "" {
 		current = "-"
 	}
-	return fmt.Sprintf("m:%s c:%s s:%s f:%s", m.mode, current, staged, filter)
+	return fmt.Sprintf("c:%s s:%s f:%s", current, staged, filter)
 }
 
 func compactMeta(m tuiModel) string {
@@ -2737,7 +2737,7 @@ func compactMeta(m tuiModel) string {
 	if current == "" {
 		current = "-"
 	}
-	return fmt.Sprintf("mode:%s | current:%s | staged:%s | filter:%s", m.mode, current, staged, filter)
+	return fmt.Sprintf("current:%s | staged:%s | filter:%s", current, staged, filter)
 }
 
 type compResultMsg struct {
