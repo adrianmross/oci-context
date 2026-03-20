@@ -1973,7 +1973,7 @@ func (m tuiModel) View() string {
 	}
 	panelContent := m.activeListView()
 	if m.activeListFilterState() == list.Unfiltered {
-		panelContent = m.theme.statusMuted.Render("Filter: press / to filter") + "\n" + panelContent
+		panelContent = m.theme.statusMuted.Render("Filter: press / to filter") + "\n\n" + panelContent
 	}
 	if m.mode == "compartments" && m.crumb != "" {
 		panelContent = m.theme.statusMuted.Render(m.crumb) + "\n" + panelContent
