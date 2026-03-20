@@ -21,7 +21,7 @@ func TestRootVersionFlagLong(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--version"})
+	cmd.SetArgs([]string{"--version", "--version"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -55,6 +55,71 @@ func TestRootVersionFlagShort(t *testing.T) {
 	}
 	if got := strings.TrimSpace(out.String()); got != "v9.9.9-short" {
 		t.Fatalf("expected version output, got %q", got)
+	}
+}
+
+func TestRootVersionFlagShortVerboseDoubleV(t *testing.T) {
+	origVersion, origCommit, origDate := version, commit, date
+	version = "v2.0.0"
+	commit = "def5678"
+	date = "2026-03-20T18:00:00Z"
+	t.Cleanup(func() {
+		version = origVersion
+		commit = origCommit
+		date = origDate
+	})
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-vv"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	got := strings.TrimSpace(out.String())
+	want := "v2.0.0 commit=def5678 built=2026-03-20T18:00:00Z"
+	if got != want {
+		t.Fatalf("expected verbose version output %q, got %q", want, got)
+	}
+}
+
+func TestRootVersionFlagVVersionLong(t *testing.T) {
+	origVersion, origCommit, origDate := version, commit, date
+	version = "v3.0.0"
+	commit = "fff9999"
+	date = "2026-03-20T20:00:00Z"
+	t.Cleanup(func() {
+		version = origVersion
+		commit = origCommit
+		date = origDate
+	})
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--vversion"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	got := strings.TrimSpace(out.String())
+	want := "v3.0.0 commit=fff9999 built=2026-03-20T20:00:00Z"
+	if got != want {
+		t.Fatalf("expected verbose version output %q, got %q", want, got)
+	}
+}
+
+func TestRootHelpFlagDescription(t *testing.T) {
+	cmd := newRootCmd()
+	helpFlag := cmd.Flags().Lookup("help")
+	if helpFlag == nil {
+		t.Fatalf("expected help flag to exist")
+	}
+	if helpFlag.Usage != "Print this menu" {
+		t.Fatalf("expected help flag usage to be customized, got %q", helpFlag.Usage)
 	}
 }
 
