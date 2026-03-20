@@ -299,7 +299,6 @@ func newAuthCmd() *cobra.Command {
 			ociArgs := buildOCIArgs([]string{
 				"iam", "region-subscription", "list",
 				"--tenancy-id", ctx.TenancyOCID,
-				"--limit", "1",
 				"--output", "json",
 			}, ctx, cfg.Options.OCIConfigPath)
 			if !hasOCIFlag(ociArgs, "--auth", "") {
