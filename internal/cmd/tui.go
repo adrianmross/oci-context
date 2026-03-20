@@ -1051,7 +1051,7 @@ func (c contextItem) Title() string {
 		if !c.fromSaved {
 			return c.Name + " @CURRENT"
 		}
-		return "@CURRENT"
+		return c.Name
 	}
 	return c.Name
 }
