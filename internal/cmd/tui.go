@@ -2591,8 +2591,15 @@ func (m tuiModel) shouldInlineHotkeys() bool {
 	if m.ultraCompact || m.helpVisible {
 		return false
 	}
-	// Keep one-line state+keys only when there is room to avoid wrapping noise.
-	return m.width >= 116
+	if m.width <= 0 {
+		return false
+	}
+	// Keep one-line state+keys only when the full rendered content fits.
+	meta := inlineStateSummary(m)
+	hotkeys := primaryHotkeys(m.width > 0 && m.width < 90)
+	required := lipgloss.Width("state " + meta + "  keys " + hotkeys)
+	// Small safety margin for terminal/padding variances.
+	return m.width >= required+2
 }
 
 func primaryHotkeys(compact bool) string {
