@@ -913,3 +913,32 @@ func TestTUIEnterDrillsWithMarkedCompItem(t *testing.T) {
 		t.Fatalf("expected to drill to child compartment %q, got %q", child.oc.ID, res.parentID)
 	}
 }
+
+func TestTUIEnterDrillsFromAppliedCompartmentFilterAndClearsFilter(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "compartments"
+	m.ctxItem = ci
+	child := compItem{oc: oci.Compartment{ID: "ocid1.compartment.oc1..child", Name: "child", Parent: ci.TenancyOCID, Status: "ACTIVE"}}
+	m.comps.SetItems([]list.Item{child})
+	m.comps.Select(0)
+	m.comps.SetFilteringEnabled(true)
+	m.comps.SetFilterText("chi")
+	m.comps.SetFilterState(list.FilterApplied)
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	res := model.(tuiModel)
+	if res.parentID != child.oc.ID {
+		t.Fatalf("expected to drill to child compartment %q, got %q", child.oc.ID, res.parentID)
+	}
+	if res.comps.FilterState() != list.Unfiltered {
+		t.Fatalf("expected compartment filter to be cleared after drill, got %v", res.comps.FilterState())
+	}
+	if res.comps.FilterValue() != "" {
+		t.Fatalf("expected compartment filter text to be cleared, got %q", res.comps.FilterValue())
+	}
+}

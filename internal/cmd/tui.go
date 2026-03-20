@@ -1480,7 +1480,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "shift+tab":
 			return m.cycleMenu(false)
 		case "enter", "right":
-			if m.activeListFilterState() == list.FilterApplied {
+			if m.activeListFilterState() == list.FilterApplied && m.mode != "compartments" {
 				// Don't drill on enter while a filter is applied; use '/' to edit filter or Esc to clear.
 				return m, nil
 			}
@@ -1551,6 +1551,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.finalizeSelection()
 				}
 				if item, ok := asCompItem(m.comps.SelectedItem()); ok {
+					// On drill, clear any applied compartment filter so the child level starts unfiltered.
+					if m.comps.FilterState() == list.FilterApplied {
+						m.comps.SetFilterText("")
+						m.comps.SetFilterState(list.Unfiltered)
+					}
 					m.parentID = item.oc.ID
 					m.parentCrumb = item.oc.Name
 					m.nameMap[item.oc.ID] = item.oc.Name
