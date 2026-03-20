@@ -1725,6 +1725,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == "contexts" {
 		m.list, cmd = m.list.Update(msg)
+		if km, ok := msg.(tea.KeyMsg); ok && isVerticalNavKey(km.String()) {
+			m.skipNonContextRows(navDirection(km.String()))
+		}
 		return m, cmd
 	}
 	if m.mode == "tenancies" {
@@ -1847,6 +1850,9 @@ func (m tuiModel) updateActiveList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	l := m.activeListModel()
 	l, cmd = l.Update(msg)
 	m.setActiveListModel(l)
+	if km, ok := msg.(tea.KeyMsg); ok && m.mode == "contexts" && isVerticalNavKey(km.String()) {
+		m.skipNonContextRows(navDirection(km.String()))
+	}
 	return m, cmd
 }
 
@@ -1860,6 +1866,53 @@ func (m *tuiModel) setActiveListModel(l list.Model) {
 		m.regions = l
 	default:
 		m.comps = l
+	}
+}
+
+func isVerticalNavKey(key string) bool {
+	switch key {
+	case "up", "k", "ctrl+p", "pgup", "down", "j", "ctrl+n", "pgdown":
+		return true
+	default:
+		return false
+	}
+}
+
+func navDirection(key string) int {
+	switch key {
+	case "up", "k", "ctrl+p", "pgup":
+		return -1
+	default:
+		return 1
+	}
+}
+
+func (m *tuiModel) skipNonContextRows(dir int) {
+	items := m.list.Items()
+	if len(items) == 0 {
+		return
+	}
+	idx := m.list.Index()
+	if idx < 0 || idx >= len(items) {
+		return
+	}
+	if _, ok := items[idx].(contextItem); ok {
+		return
+	}
+
+	// First try moving in the user's requested direction.
+	for i := idx + dir; i >= 0 && i < len(items); i += dir {
+		if _, ok := items[i].(contextItem); ok {
+			m.list.Select(i)
+			return
+		}
+	}
+	// Fallback to the opposite direction if we hit an edge.
+	for i := idx - dir; i >= 0 && i < len(items); i -= dir {
+		if _, ok := items[i].(contextItem); ok {
+			m.list.Select(i)
+			return
+		}
 	}
 }
 

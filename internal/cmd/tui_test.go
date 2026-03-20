@@ -644,3 +644,55 @@ func TestProfileMenuItemsCurrentEquivalentContextPromotesToProfileCurrentLabel(t
 		t.Fatalf("expected current profile row to be marked, got %q", got)
 	}
 }
+
+func TestTUIContextNavigationSkipsSectionAndSeparatorRows(t *testing.T) {
+	profiles := map[string]ocicfg.Profile{
+		"DEFAULT": {Tenancy: "ocid1.tenancy.oc1..ten", Region: "us-phoenix-1"},
+		"ALT":     {Tenancy: "ocid1.tenancy.oc1..ten", Region: "us-ashburn-1"},
+	}
+	cfg := config.Config{
+		Options:        config.Options{OCIConfigPath: "/tmp/oci"},
+		CurrentContext: "CTX",
+		Contexts: []config.Context{
+			{
+				Name:            "CTX",
+				Profile:         "DEFAULT",
+				TenancyOCID:     "ocid1.tenancy.oc1..ten",
+				CompartmentOCID: "ocid1.compartment.oc1..abc",
+				Region:          "us-phoenix-1",
+			},
+		},
+	}
+
+	items := profileMenuItemsForDensity(cfg, profiles, nil, true)
+	m := newTuiModel(cfg, "", items, profiles, "")
+	m.mode = "contexts"
+
+	// Select the saved context row, then one down should land on first profile row.
+	for i, it := range m.list.Items() {
+		if ci, ok := it.(contextItem); ok && ci.fromSaved {
+			m.list.Select(i)
+			break
+		}
+	}
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	res := model.(tuiModel)
+	selected, ok := res.list.SelectedItem().(contextItem)
+	if !ok {
+		t.Fatalf("expected context item selected after down, got %T", res.list.SelectedItem())
+	}
+	if selected.fromSaved {
+		t.Fatalf("expected to skip separator/header into profile row, got saved context %s", selected.Name)
+	}
+
+	// One up should return to saved context row, skipping separator/header in reverse.
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyUp})
+	res = model.(tuiModel)
+	selected, ok = res.list.SelectedItem().(contextItem)
+	if !ok {
+		t.Fatalf("expected context item selected after up, got %T", res.list.SelectedItem())
+	}
+	if !selected.fromSaved {
+		t.Fatalf("expected to skip separator/header back to saved context, got profile %s", selected.Name)
+	}
+}
