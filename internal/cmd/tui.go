@@ -778,7 +778,7 @@ type tuiModel struct {
 	theme              tuiTheme
 	prefs              tuiPrefs
 	prefsPath          string
-	forceMatrix        bool
+	layoutOverride     string // "", "list", or "matrix"
 	width              int
 	height             int
 	panelInnerHeight   int
@@ -1393,12 +1393,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Verbose %s for %s (session)", onOff(next), m.mode)
 			return m, nil
 		case "m":
-			m.forceMatrix = !m.forceMatrix
-			if m.forceMatrix {
-				m.status = "Layout matrix (session)"
+			if m.effectiveGridLayout() {
+				m.layoutOverride = "list"
 			} else {
-				m.status = "Layout list (session)"
+				m.layoutOverride = "matrix"
 			}
+			m.status = fmt.Sprintf("Layout %s (session)", m.layoutOverride)
 			return m, nil
 		}
 	}
@@ -1627,19 +1627,30 @@ func onOff(v bool) string {
 }
 
 func (m tuiModel) shouldUseGridLayout() bool {
-	if m.ultraCompact || m.helpVisible || m.width < 96 || m.isFilteringActive() {
+	if m.layoutOverride == "matrix" {
+		return m.gridAllowedInCurrentState()
+	}
+	if m.layoutOverride == "list" {
 		return false
 	}
-	if len(m.activeListModel().Items()) == 0 {
+	return m.effectiveGridLayout()
+}
+
+func (m tuiModel) effectiveGridLayout() bool {
+	if !m.gridAllowedInCurrentState() {
 		return false
-	}
-	if m.forceMatrix {
-		return true
 	}
 	if m.isModeVerbose(m.mode) {
 		return false
 	}
 	return m.panelInnerHeight >= 3
+}
+
+func (m tuiModel) gridAllowedInCurrentState() bool {
+	if m.ultraCompact || m.helpVisible || m.width < 96 || m.isFilteringActive() {
+		return false
+	}
+	return len(m.activeListModel().Items()) > 0
 }
 
 func (m tuiModel) gridColumnsForCount(count int) int {
