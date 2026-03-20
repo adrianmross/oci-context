@@ -85,6 +85,7 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`. W
 - `oci-context init`
 - `oci-context list`
 - `oci-context current`
+- `oci-context oci -- <oci args...>` (runs OCI CLI with current context defaults)
 - `oci-context use <name>`
 - `oci-context add`
 - `oci-context set <name> --field value`
@@ -93,6 +94,19 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`. W
 - `oci-context export --format env|json`
 - `oci-context daemon start|stop|status`
 - `oci-context tui`
+
+### OCI CLI Defaults (Transparent `oci` Usage)
+To run plain `oci ...` commands without repeatedly passing `--profile`, `--region`, and `--compartment-id`, load managed OCI CLI defaults once per shell:
+
+```sh
+eval "$(oci-context export -f oci-env)"
+```
+
+This sets:
+- `OCI_CLI_RC_FILE` to a managed rc file updated from your current context
+- `OCI_CLI_CONFIG_FILE` to your configured OCI config path
+
+After that, when you run `oci-context use ...` (or save from TUI), the managed OCI CLI defaults are refreshed automatically.
 
 ### current
 Prints only the current context name.

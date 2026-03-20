@@ -40,15 +40,33 @@ func newExportCmd() *cobra.Command {
 
 			switch format {
 			case "env", "":
-				lines := []string{
-					fmt.Sprintf("export OCI_CLI_PROFILE=%s", ctx.Profile),
+				lines := []string{}
+				if ctx.Profile != "" {
+					lines = append(lines, fmt.Sprintf("export OCI_CLI_PROFILE=%s", ctx.Profile))
+				}
+				if ctx.Region != "" {
+					lines = append(lines, fmt.Sprintf("export OCI_CLI_REGION=%s", ctx.Region))
+				}
+				if cfg.Options.OCIConfigPath != "" {
+					lines = append(lines, fmt.Sprintf("export OCI_CLI_CONFIG_FILE=%s", cfg.Options.OCIConfigPath))
+				}
+				lines = append(lines,
 					fmt.Sprintf("export OCI_TENANCY_OCID=%s", ctx.TenancyOCID),
 					fmt.Sprintf("export OCI_COMPARTMENT_OCID=%s", ctx.CompartmentOCID),
-				}
+				)
 				if ctx.Region != "" {
 					lines = append(lines, fmt.Sprintf("export OCI_REGION=%s", ctx.Region))
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), strings.Join(lines, "\n"))
+			case "oci-env":
+				if err := syncOCIDefaultsForCurrent(cfg); err != nil {
+					return err
+				}
+				rcPath, err := managedOCIRCPath()
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), strings.Join(ociEnvExportLines(cfg, rcPath), "\n"))
 			case "json":
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
@@ -64,6 +82,6 @@ func newExportCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	cmd.Flags().BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
-	cmd.Flags().StringVarP(&format, "format", "f", "env", "Output format: env|json")
+	cmd.Flags().StringVarP(&format, "format", "f", "env", "Output format: env|json|oci-env")
 	return cmd
 }

@@ -23,6 +23,8 @@ import (
 
 var (
 	stagedColor      = lipgloss.Color("205")
+	currentColor     = lipgloss.Color("42")
+	selectionBgColor = lipgloss.Color("33")
 	infoColor        = lipgloss.Color("252")
 	accentColor      = lipgloss.Color("45")
 	activeTabColor   = lipgloss.Color("33")
@@ -51,6 +53,10 @@ type tuiTheme struct {
 	statusMuted  lipgloss.Style
 	ultraBadge   lipgloss.Style
 	metaBar      lipgloss.Style
+	gridCell     lipgloss.Style
+	gridSelected lipgloss.Style
+	gridStaged   lipgloss.Style
+	gridCurrent  lipgloss.Style
 }
 
 func newTUITheme() tuiTheme {
@@ -61,14 +67,10 @@ func newTUITheme() tuiTheme {
 			Bold(true).
 			Foreground(lipgloss.Color("230")).
 			Background(activeTabColor).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(activeTabColor).
 			Padding(0, 1).
 			MarginRight(1),
 		tabInactive: lipgloss.NewStyle().
 			Foreground(inactiveTabColor).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(panelColor).
 			Padding(0, 1).
 			MarginRight(1),
 		panel: lipgloss.NewStyle().
@@ -94,10 +96,20 @@ func newTUITheme() tuiTheme {
 		ultraBadge: lipgloss.NewStyle().
 			Foreground(infoColor).
 			Bold(true),
-		metaBar: lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(panelColor).
+		metaBar: lipgloss.NewStyle(),
+		gridCell: lipgloss.NewStyle().
 			Padding(0, 1),
+		gridSelected: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("230")).
+			Background(selectionBgColor).
+			Bold(true).
+			Padding(0, 1),
+		gridStaged: lipgloss.NewStyle().
+			Foreground(stagedColor).
+			Bold(true),
+		gridCurrent: lipgloss.NewStyle().
+			Foreground(currentColor).
+			Bold(true),
 	}
 }
 
@@ -197,6 +209,8 @@ var fallbackRegions = []string{
 	"il-jerusalem-1",
 }
 
+const filterPlaceholderHint = "press esc to escape"
+
 // abbreviateOCID shortens an OCID for display.
 func abbreviateOCID(s string) string {
 	if len(s) <= 16 {
@@ -226,14 +240,7 @@ func newTuiCmd() *cobra.Command {
 				return err
 			}
 			profiles, perr := ocicfg.LoadProfiles(cfg.Options.OCIConfigPath)
-			items := contextsFromProfiles(profiles)
-			if perr != nil || len(items) == 0 {
-				// fallback to stored contexts if profile parsing fails or yields none
-				items = make([]list.Item, 0, len(cfg.Contexts))
-				for _, ctx := range cfg.Contexts {
-					items = append(items, contextItem{ctx})
-				}
-			}
+			items := profileMenuItems(cfg, profiles, perr)
 			startMode := ""
 			if len(args) == 1 {
 				startMode = args[0]
@@ -265,29 +272,78 @@ func toRegionList(regions []string) []list.Item {
 	return items
 }
 
-// compDelegate wraps the default delegate to color the pending selection when present.
-type compDelegate struct {
-	list.DefaultDelegate
-	pendingID *string
-}
+type separatorItem struct{}
 
-type markedItem struct {
-	base  list.Item
+func (s separatorItem) Title() string       { return "" }
+func (s separatorItem) Description() string { return "" }
+func (s separatorItem) FilterValue() string { return "" }
+
+type sectionItem struct {
 	title string
 }
 
+func (s sectionItem) Title() string       { return s.title }
+func (s sectionItem) Description() string { return "" }
+func (s sectionItem) FilterValue() string { return "" }
+
+// compDelegate wraps the default delegate to color the pending selection when present.
+type compDelegate struct {
+	list.DefaultDelegate
+	pendingID    *string
+	currentID    *string
+	ultraCompact bool
+}
+
+type markedItem struct {
+	base        list.Item
+	title       string
+	description string
+}
+
 func (m markedItem) Title() string       { return m.title }
-func (m markedItem) Description() string { return "" }
+func (m markedItem) Description() string { return m.description }
 func (m markedItem) FilterValue() string { return m.base.FilterValue() }
 
-func withStageMarker(item list.Item) list.Item {
-	return markedItem{base: item, title: "[*] " + itemTitle(item) + " [staged]"}
+func withStageMarker(item list.Item, ultraCompact bool) list.Item {
+	title := itemTitle(item)
+	description := itemDescription(item)
+	if ultraCompact {
+		return markedItem{base: item, title: "[*] " + title, description: description}
+	}
+	badge := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("230")).
+		Background(stagedColor).
+		Bold(true).
+		Padding(0, 1).
+		Render("STAGED")
+	return markedItem{base: item, title: fmt.Sprintf("%s  %s", title, badge), description: description}
+}
+
+func withCurrentMarker(item list.Item, ultraCompact bool) list.Item {
+	title := itemTitle(item)
+	description := itemDescription(item)
+	if ultraCompact {
+		return markedItem{base: item, title: "[=] " + title, description: description}
+	}
+	badge := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("230")).
+		Background(currentColor).
+		Bold(true).
+		Padding(0, 1).
+		Render("CURRENT")
+	return markedItem{base: item, title: fmt.Sprintf("%s  %s", title, badge), description: description}
 }
 
 func itemTitle(item list.Item) string {
 	switch it := item.(type) {
+	case markedItem:
+		return it.Title()
 	case contextItem:
 		return it.Title()
+	case sectionItem:
+		return it.Title()
+	case separatorItem:
+		return ""
 	case tenancyItem:
 		return it.Title()
 	case compItem:
@@ -296,6 +352,27 @@ func itemTitle(item list.Item) string {
 		return it.Title()
 	default:
 		return item.FilterValue()
+	}
+}
+
+func itemDescription(item list.Item) string {
+	switch it := item.(type) {
+	case markedItem:
+		return it.Description()
+	case contextItem:
+		return it.Description()
+	case sectionItem:
+		return it.Description()
+	case separatorItem:
+		return ""
+	case tenancyItem:
+		return it.Description()
+	case compItem:
+		return it.Description()
+	case regionItem:
+		return it.Description()
+	default:
+		return ""
 	}
 }
 
@@ -316,10 +393,12 @@ func applyDelegateTheme(d *list.DefaultDelegate) {
 	normalTitle := lipgloss.NewStyle().Foreground(infoColor)
 	normalDesc := lipgloss.NewStyle().Foreground(mutedTextColor)
 	selectedTitle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("230")).
-		Background(activeTabColor).
+		Foreground(infoColor).
+		Background(selectionBgColor).
 		Bold(true)
-	selectedDesc := lipgloss.NewStyle().Foreground(accentColor)
+	selectedDesc := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("250")).
+		Background(selectionBgColor)
 
 	d.Styles.NormalTitle = normalTitle
 	d.Styles.NormalDesc = normalDesc
@@ -330,30 +409,37 @@ func applyDelegateTheme(d *list.DefaultDelegate) {
 	d.Styles.FilterMatch = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 }
 
-func newCompDelegate(pendingID *string, ultraCompact bool) *compDelegate {
+func newCompDelegate(pendingID *string, currentID *string, ultraCompact bool) *compDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &compDelegate{DefaultDelegate: d, pendingID: pendingID}
+	return &compDelegate{
+		DefaultDelegate: d,
+		pendingID:       pendingID,
+		currentID:       currentID,
+		ultraCompact:    ultraCompact,
+	}
 }
 
 func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	if ci, ok := listItem.(compItem); ok && d.pendingID != nil && *d.pendingID != "" && ci.oc.ID == *d.pendingID {
 		origNormalTitle := d.Styles.NormalTitle
 		origNormalDesc := d.Styles.NormalDesc
-		origTitle := d.Styles.SelectedTitle
-		origDesc := d.Styles.SelectedDesc
-		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
-		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
-		d.Styles.NormalTitle = pendingTitle
-		d.Styles.NormalDesc = pendingDesc
-		d.Styles.SelectedTitle = pendingTitle
-		d.Styles.SelectedDesc = pendingDesc
-		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
+		d.Styles.NormalTitle = origNormalTitle.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalDesc = origNormalDesc.Foreground(stagedColor).Bold(true)
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origNormalTitle
 		d.Styles.NormalDesc = origNormalDesc
-		d.Styles.SelectedTitle = origTitle
-		d.Styles.SelectedDesc = origDesc
+		return
+	}
+	if ci, ok := listItem.(compItem); ok && d.currentID != nil && *d.currentID != "" && ci.oc.ID == *d.currentID {
+		origNormalTitle := d.Styles.NormalTitle
+		origNormalDesc := d.Styles.NormalDesc
+		d.Styles.NormalTitle = origNormalTitle.Foreground(currentColor).Bold(true)
+		d.Styles.NormalDesc = origNormalDesc.Foreground(currentColor).Bold(true)
+		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		d.Styles.NormalTitle = origNormalTitle
+		d.Styles.NormalDesc = origNormalDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -362,39 +448,71 @@ func (d *compDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 // regionDelegate highlights pending region selection when present.
 type regionDelegate struct {
 	list.DefaultDelegate
-	pendingName *string
+	pendingName  *string
+	currentName  *string
+	ultraCompact bool
 }
 
 // contextDelegate highlights pending context selection when present.
 type contextDelegate struct {
 	list.DefaultDelegate
-	pendingName *string
+	pendingName  *string
+	currentName  *string
+	ultraCompact bool
 }
 
-func newContextDelegate(pendingName *string, ultraCompact bool) *contextDelegate {
+func newContextDelegate(pendingName *string, currentName *string, ultraCompact bool) *contextDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &contextDelegate{DefaultDelegate: d, pendingName: pendingName}
+	return &contextDelegate{
+		DefaultDelegate: d,
+		pendingName:     pendingName,
+		currentName:     currentName,
+		ultraCompact:    ultraCompact,
+	}
 }
 
 func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	if _, ok := listItem.(separatorItem); ok {
+		if d.ultraCompact {
+			// In compact mode, draw only one divider at section boundaries.
+			return
+		}
+		line := strings.Repeat("─", 36)
+		fmt.Fprint(w, lipgloss.NewStyle().Foreground(panelColor).Render(line))
+		return
+	}
+	if si, ok := listItem.(sectionItem); ok {
+		if d.ultraCompact {
+			// In compact mode, keep exactly one divider between CONTEXTS and PROFILES.
+			if strings.EqualFold(si.title, "PROFILES") && index > 0 {
+				line := strings.Repeat("─", 36)
+				fmt.Fprint(w, lipgloss.NewStyle().Foreground(panelColor).Render(line))
+			}
+			return
+		}
+		fmt.Fprint(w, lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true).Render(si.Title()))
+		return
+	}
 	if ci, ok := listItem.(contextItem); ok && d.pendingName != nil && *d.pendingName != "" && ci.Name == *d.pendingName {
 		origTitle := d.Styles.NormalTitle
 		origDesc := d.Styles.NormalDesc
-		origSelectedTitle := d.Styles.SelectedTitle
-		origSelectedDesc := d.Styles.SelectedDesc
-		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
-		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
-		d.Styles.NormalTitle = pendingTitle
-		d.Styles.NormalDesc = pendingDesc
-		d.Styles.SelectedTitle = pendingTitle
-		d.Styles.SelectedDesc = pendingDesc
-		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
+		d.Styles.NormalTitle = origTitle.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalDesc = origDesc.Foreground(stagedColor).Bold(true)
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origTitle
 		d.Styles.NormalDesc = origDesc
-		d.Styles.SelectedTitle = origSelectedTitle
-		d.Styles.SelectedDesc = origSelectedDesc
+		return
+	}
+	if ci, ok := listItem.(contextItem); ok && d.currentName != nil && *d.currentName != "" && ci.Name == *d.currentName {
+		origTitle := d.Styles.NormalTitle
+		origDesc := d.Styles.NormalDesc
+		d.Styles.NormalTitle = origTitle.Foreground(currentColor).Bold(true)
+		d.Styles.NormalDesc = origDesc.Foreground(currentColor).Bold(true)
+		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		d.Styles.NormalTitle = origTitle
+		d.Styles.NormalDesc = origDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
@@ -403,69 +521,85 @@ func (d *contextDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 // tenancyDelegate highlights pending tenancy selection when present.
 type tenancyDelegate struct {
 	list.DefaultDelegate
-	pendingOCID *string
+	pendingOCID  *string
+	currentOCID  *string
+	ultraCompact bool
 }
 
-func newTenancyDelegate(pendingOCID *string, ultraCompact bool) *tenancyDelegate {
+func newTenancyDelegate(pendingOCID *string, currentOCID *string, ultraCompact bool) *tenancyDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &tenancyDelegate{DefaultDelegate: d, pendingOCID: pendingOCID}
+	return &tenancyDelegate{
+		DefaultDelegate: d,
+		pendingOCID:     pendingOCID,
+		currentOCID:     currentOCID,
+		ultraCompact:    ultraCompact,
+	}
 }
 
 func (d *tenancyDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	if ti, ok := listItem.(tenancyItem); ok && d.pendingOCID != nil && *d.pendingOCID != "" && ti.TenancyOCID == *d.pendingOCID {
 		origTitle := d.Styles.NormalTitle
 		origDesc := d.Styles.NormalDesc
-		origSelectedTitle := d.Styles.SelectedTitle
-		origSelectedDesc := d.Styles.SelectedDesc
-		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
-		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
-		d.Styles.NormalTitle = pendingTitle
-		d.Styles.NormalDesc = pendingDesc
-		d.Styles.SelectedTitle = pendingTitle
-		d.Styles.SelectedDesc = pendingDesc
-		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
+		d.Styles.NormalTitle = origTitle.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalDesc = origDesc.Foreground(stagedColor).Bold(true)
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origTitle
 		d.Styles.NormalDesc = origDesc
-		d.Styles.SelectedTitle = origSelectedTitle
-		d.Styles.SelectedDesc = origSelectedDesc
+		return
+	}
+	if ti, ok := listItem.(tenancyItem); ok && d.currentOCID != nil && *d.currentOCID != "" && ti.TenancyOCID == *d.currentOCID {
+		origTitle := d.Styles.NormalTitle
+		origDesc := d.Styles.NormalDesc
+		d.Styles.NormalTitle = origTitle.Foreground(currentColor).Bold(true)
+		d.Styles.NormalDesc = origDesc.Foreground(currentColor).Bold(true)
+		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		d.Styles.NormalTitle = origTitle
+		d.Styles.NormalDesc = origDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
 }
 
-func newRegionDelegate(pendingName *string, ultraCompact bool) *regionDelegate {
+func newRegionDelegate(pendingName *string, currentName *string, ultraCompact bool) *regionDelegate {
 	d := list.NewDefaultDelegate()
 	configureDefaultDelegateDensity(&d, ultraCompact)
 	applyDelegateTheme(&d)
-	return &regionDelegate{DefaultDelegate: d, pendingName: pendingName}
+	return &regionDelegate{
+		DefaultDelegate: d,
+		pendingName:     pendingName,
+		currentName:     currentName,
+		ultraCompact:    ultraCompact,
+	}
 }
 
 func (d *regionDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	if ri, ok := listItem.(regionItem); ok && d.pendingName != nil && *d.pendingName != "" && ri.name == *d.pendingName {
 		origNormalTitle := d.Styles.NormalTitle
 		origNormalDesc := d.Styles.NormalDesc
-		origTitle := d.Styles.SelectedTitle
-		origDesc := d.Styles.SelectedDesc
-		pendingTitle := origTitle.Foreground(stagedColor).Bold(true)
-		pendingDesc := origDesc.Foreground(stagedColor).Bold(true)
-		d.Styles.NormalTitle = pendingTitle
-		d.Styles.NormalDesc = pendingDesc
-		d.Styles.SelectedTitle = pendingTitle
-		d.Styles.SelectedDesc = pendingDesc
-		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem))
+		d.Styles.NormalTitle = origNormalTitle.Foreground(stagedColor).Bold(true)
+		d.Styles.NormalDesc = origNormalDesc.Foreground(stagedColor).Bold(true)
+		d.DefaultDelegate.Render(w, m, index, withStageMarker(listItem, d.ultraCompact))
 		d.Styles.NormalTitle = origNormalTitle
 		d.Styles.NormalDesc = origNormalDesc
-		d.Styles.SelectedTitle = origTitle
-		d.Styles.SelectedDesc = origDesc
+		return
+	}
+	if ri, ok := listItem.(regionItem); ok && d.currentName != nil && *d.currentName != "" && ri.name == *d.currentName {
+		origNormalTitle := d.Styles.NormalTitle
+		origNormalDesc := d.Styles.NormalDesc
+		d.Styles.NormalTitle = origNormalTitle.Foreground(currentColor).Bold(true)
+		d.Styles.NormalDesc = origNormalDesc.Foreground(currentColor).Bold(true)
+		d.DefaultDelegate.Render(w, m, index, withCurrentMarker(listItem, d.ultraCompact))
+		d.Styles.NormalTitle = origNormalTitle
+		d.Styles.NormalDesc = origNormalDesc
 		return
 	}
 	d.DefaultDelegate.Render(w, m, index, listItem)
 }
 
 // contextsFromProfiles builds context items from OCI CLI profiles.
-func contextsFromProfiles(profiles map[string]ocicfg.Profile) []list.Item {
+func contextsFromProfiles(profiles map[string]ocicfg.Profile, current config.Context, hasCurrent bool) []list.Item {
 	names := make([]string, 0, len(profiles))
 	for name := range profiles {
 		names = append(names, name)
@@ -474,16 +608,203 @@ func contextsFromProfiles(profiles map[string]ocicfg.Profile) []list.Item {
 	items := make([]list.Item, 0, len(names))
 	for _, name := range names {
 		p := profiles[name]
-		items = append(items, contextItem{config.Context{
+		ci := contextItem{Context: config.Context{
 			Name:            name,
 			Profile:         name,
 			TenancyOCID:     p.Tenancy,
 			CompartmentOCID: p.Tenancy,
 			Region:          p.Region,
 			User:            p.User,
-		}})
+		}}
+		if hasCurrent && isContextEquivalentToNamedProfile(current, name, p) {
+			ci.isCurrent = true
+		}
+		items = append(items, ci)
 	}
 	return items
+}
+
+func contextsFromConfig(cfg config.Config, profiles map[string]ocicfg.Profile) []list.Item {
+	names := make([]string, 0, len(cfg.Contexts))
+	byName := make(map[string]config.Context, len(cfg.Contexts))
+	seenBySignature := make(map[string]string) // signature -> kept context name
+	for _, c := range cfg.Contexts {
+		if isContextEquivalentToProfile(c, profiles) {
+			// Hide contexts that are effectively identical to an OCI profile baseline.
+			continue
+		}
+		sig := contextSignature(c)
+		if keptName, exists := seenBySignature[sig]; exists {
+			// Prefer current context when two saved contexts are equivalent by effective values.
+			if c.Name == cfg.CurrentContext {
+				delete(byName, keptName)
+				for i, n := range names {
+					if n == keptName {
+						names = append(names[:i], names[i+1:]...)
+						break
+					}
+				}
+				seenBySignature[sig] = c.Name
+			} else {
+				continue
+			}
+		} else {
+			seenBySignature[sig] = c.Name
+		}
+		names = append(names, c.Name)
+		byName[c.Name] = c
+	}
+	sort.Strings(names)
+	if cfg.CurrentContext != "" {
+		for i, n := range names {
+			if n == cfg.CurrentContext {
+				names = append([]string{n}, append(names[:i], names[i+1:]...)...)
+				break
+			}
+		}
+	}
+	items := make([]list.Item, 0, len(names))
+	for _, name := range names {
+		items = append(items, contextItem{
+			Context:   byName[name],
+			fromSaved: true,
+			isCurrent: name == cfg.CurrentContext,
+		})
+	}
+	return items
+}
+
+func contextSignature(c config.Context) string {
+	return strings.Join([]string{
+		c.Profile,
+		c.TenancyOCID,
+		c.CompartmentOCID,
+		c.Region,
+	}, "|")
+}
+
+func profileMenuItems(cfg config.Config, profiles map[string]ocicfg.Profile, profilesErr error) []list.Item {
+	return profileMenuItemsForDensity(cfg, profiles, profilesErr, true)
+}
+
+func profileMenuItemsForDensity(cfg config.Config, profiles map[string]ocicfg.Profile, profilesErr error, showSections bool) []list.Item {
+	current, hasCurrent := cfg.GetContext(cfg.CurrentContext)
+	profileItems := contextsFromProfiles(profiles, current, hasCurrent == nil)
+	contextItems := contextsFromConfig(cfg, profiles)
+	items := make([]list.Item, 0, len(profileItems)+len(contextItems)+4)
+
+	if showSections {
+		if len(contextItems) > 0 {
+			items = append(items, sectionItem{title: "CONTEXTS"})
+			items = append(items, contextItems...)
+		}
+		if len(profileItems) > 0 {
+			if len(contextItems) > 0 {
+				items = append(items, separatorItem{})
+			}
+			items = append(items, sectionItem{title: "PROFILES"})
+			items = append(items, profileItems...)
+		}
+	} else {
+		items = append(items, contextItems...)
+		if len(contextItems) > 0 && len(profileItems) > 0 {
+			items = append(items, separatorItem{})
+		}
+		items = append(items, profileItems...)
+	}
+	if len(items) > 0 {
+		return items
+	}
+	// Ultimate fallback if both sources are empty/unavailable.
+	if profilesErr != nil {
+		return []list.Item{}
+	}
+	return profileItems
+}
+
+func (m *tuiModel) refreshContextMenuItems() {
+	if !m.managedContextMenu {
+		return
+	}
+	showSections := m.isModeVerbose("contexts")
+	items := profileMenuItemsForDensity(m.cfg, m.profiles, nil, showSections)
+	if len(items) == 0 {
+		m.list.SetItems(items)
+		return
+	}
+	selectedName := ""
+	if selected, ok := m.list.SelectedItem().(contextItem); ok {
+		selectedName = selected.Name
+	}
+	m.list.SetItems(items)
+	if selectedName == "" {
+		selectedName = m.cfg.CurrentContext
+	}
+	if selectedName != "" {
+		for i, it := range items {
+			if ci, ok := it.(contextItem); ok && ci.Name == selectedName {
+				m.list.Select(i)
+				return
+			}
+		}
+	}
+	for i, it := range items {
+		if _, ok := it.(contextItem); ok {
+			m.list.Select(i)
+			return
+		}
+	}
+}
+
+func isContextEquivalentToProfile(c config.Context, profiles map[string]ocicfg.Profile) bool {
+	profileName := c.Profile
+	if profileName == "" {
+		// Legacy contexts may omit profile but keep the context name identical to profile.
+		profileName = c.Name
+	}
+	p, ok := profiles[profileName]
+	if !ok {
+		return false
+	}
+	tenancy := c.TenancyOCID
+	if tenancy == "" {
+		tenancy = p.Tenancy
+	}
+	region := c.Region
+	if region == "" {
+		region = p.Region
+	}
+	compartment := c.CompartmentOCID
+	if compartment == "" {
+		// Empty compartment in context means root/tenancy in this app.
+		compartment = tenancy
+	}
+	return tenancy == p.Tenancy &&
+		region == p.Region &&
+		compartment == p.Tenancy
+}
+
+func isContextEquivalentToNamedProfile(c config.Context, profileName string, p ocicfg.Profile) bool {
+	ctxProfile := c.Profile
+	if ctxProfile == "" {
+		ctxProfile = c.Name
+	}
+	if ctxProfile != profileName {
+		return false
+	}
+	tenancy := c.TenancyOCID
+	if tenancy == "" {
+		tenancy = p.Tenancy
+	}
+	region := c.Region
+	if region == "" {
+		region = p.Region
+	}
+	compartment := c.CompartmentOCID
+	if compartment == "" {
+		compartment = tenancy
+	}
+	return tenancy == p.Tenancy && region == p.Region && compartment == p.Tenancy
 }
 
 // tenanciesFromProfiles groups profiles by tenancy OCID into tenancy items.
@@ -523,7 +844,7 @@ func selectProfileForTenancy(item tenancyItem, profiles map[string]ocicfg.Profil
 
 // contextItemForProfile builds a contextItem from a profile entry.
 func contextItemForProfile(name string, p ocicfg.Profile) contextItem {
-	return contextItem{config.Context{
+	return contextItem{Context: config.Context{
 		Name:            name,
 		Profile:         name,
 		TenancyOCID:     p.Tenancy,
@@ -553,7 +874,7 @@ func runPromptFallback(cmd *cobra.Command, cfgPathFlag string) error {
 		return err
 	}
 	profiles, perr := ocicfg.LoadProfiles(cfg.Options.OCIConfigPath)
-	items := contextsFromProfiles(profiles)
+	items := contextsFromProfiles(profiles, config.Context{}, false)
 	if perr != nil || len(items) == 0 {
 		return fmt.Errorf("no profiles available from %s", cfg.Options.OCIConfigPath)
 	}
@@ -655,10 +976,25 @@ func readChoiceZero(cmd *cobra.Command, n int) (int, error) {
 	return choice - 1, nil
 }
 
-type contextItem struct{ config.Context }
+type contextItem struct {
+	config.Context
+	fromSaved bool
+	isCurrent bool
+}
 
-func (c contextItem) Title() string { return c.Name }
+func (c contextItem) Title() string {
+	if c.isCurrent {
+		if !c.fromSaved {
+			return c.Name + " @CURRENT"
+		}
+		return c.Name
+	}
+	return c.Name
+}
 func (c contextItem) Description() string {
+	if c.fromSaved {
+		return fmt.Sprintf("context profile=%s region=%s", c.Profile, c.Region)
+	}
 	return fmt.Sprintf("profile=%s region=%s", c.Profile, c.Region)
 }
 func (c contextItem) FilterValue() string { return c.Name }
@@ -708,6 +1044,18 @@ func (r regionItem) Title() string       { return r.name }
 func (r regionItem) Description() string { return r.name }
 func (r regionItem) FilterValue() string { return r.name }
 
+func asCompItem(item list.Item) (compItem, bool) {
+	switch it := item.(type) {
+	case compItem:
+		return it, true
+	case markedItem:
+		if base, ok := it.base.(compItem); ok {
+			return base, true
+		}
+	}
+	return compItem{}, false
+}
+
 type tuiModel struct {
 	list               list.Model
 	tenancies          list.Model
@@ -735,11 +1083,22 @@ type tuiModel struct {
 	pendingRegion      string              // region pending name
 	pendingContextName string              // context pending name
 	pendingTenancyOCID string              // tenancy pending OCID
+	autoStagedTenancy  bool                // true when tenancy was auto-staged from compartment stage
+	savedContextName   string              // context currently persisted on disk
+	savedTenancyOCID   string              // tenancy currently persisted on disk
+	savedCompartmentID string              // compartment currently persisted on disk
+	savedRegion        string              // region currently persisted on disk
 	ultraCompact       bool                // minimal chrome mode
+	helpVisible        bool                // keybindings panel toggle
 	initCmd            tea.Cmd             // optional startup command for shortcut modes
 	theme              tuiTheme
+	prefs              tuiPrefs
+	prefsPath          string
+	layoutOverride     string // "", "list", or "matrix"
 	width              int
 	height             int
+	panelInnerHeight   int
+	managedContextMenu bool
 }
 
 func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles map[string]ocicfg.Profile, startMode string) tuiModel {
@@ -759,14 +1118,26 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 	if defaultHeight < 10 {
 		defaultHeight = 10
 	}
+	prefs, prefsPath, prefsErr := loadTUIPrefs()
+	if prefsErr != nil {
+		prefs = defaultTUIPrefs()
+		prefsPath = ""
+	}
+
 	l := list.New(items, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	l.Title = "Select OCI context"
 	l.SetFilteringEnabled(true)
+	l.FilterInput.Placeholder = filterPlaceholderHint
+	l.SetShowFilter(false)
+	l.SetShowTitle(false)
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	tn := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	tn.Title = "Select tenancy"
 	tn.SetFilteringEnabled(true)
+	tn.FilterInput.Placeholder = filterPlaceholderHint
+	tn.SetShowFilter(false)
+	tn.SetShowTitle(false)
 	tn.SetShowHelp(false)
 	tn.SetShowStatusBar(false)
 	if len(profiles) > 0 {
@@ -783,15 +1154,30 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 			}
 		}
 	}
+	// If the selected row is a section header, move to the first actual context row.
+	if _, ok := l.SelectedItem().(contextItem); !ok {
+		for i, it := range items {
+			if _, ok := it.(contextItem); ok {
+				l.Select(i)
+				break
+			}
+		}
+	}
 	cl := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	cl.Title = "Select compartment (lazy load)"
 	cl.SetFilteringEnabled(true)
+	cl.FilterInput.Placeholder = filterPlaceholderHint
+	cl.SetShowFilter(false)
+	cl.SetShowTitle(false)
 	cl.SetShowHelp(false)
 	cl.SetShowStatusBar(false)
 	// delegate with pending highlight is attached after model creation
 	rl := list.New(nil, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	rl.Title = "Select region"
 	rl.SetFilteringEnabled(true)
+	rl.FilterInput.Placeholder = filterPlaceholderHint
+	rl.SetShowFilter(false)
+	rl.SetShowTitle(false)
 	rl.SetShowHelp(false)
 	rl.SetShowStatusBar(false)
 	m := tuiModel{
@@ -808,10 +1194,32 @@ func newTuiModel(cfg config.Config, cfgPath string, items []list.Item, profiles 
 		nameMap:     make(map[string]string),
 		regionCache: make(map[string][]string),
 		theme:       newTUITheme(),
+		prefs:       prefs,
+		prefsPath:   prefsPath,
 		width:       defaultWidth,
 		height:      defaultHeight,
 	}
+	if current, err := cfg.GetContext(cfg.CurrentContext); err == nil {
+		m.savedContextName = cfg.CurrentContext
+		m.savedTenancyOCID = current.TenancyOCID
+		m.savedCompartmentID = current.CompartmentOCID
+		if m.savedCompartmentID == "" {
+			m.savedCompartmentID = current.TenancyOCID
+		}
+		m.savedRegion = current.Region
+	}
+	for _, it := range items {
+		if _, ok := it.(sectionItem); ok {
+			m.managedContextMenu = true
+			break
+		}
+		if _, ok := it.(separatorItem); ok {
+			m.managedContextMenu = true
+			break
+		}
+	}
 	m.refreshDelegates()
+	m.refreshContextMenuItems()
 	m.applyStartMode(startMode)
 	m.resizeListsForViewport()
 	return m
@@ -830,9 +1238,11 @@ func (m *tuiModel) resizeListsForViewport() {
 		panelInnerWidth = 24
 	}
 
-	// Reserve lines for header/tabs/panel border/meta plus optional help/status.
+	// Reserve lines for top chrome so list content doesn't push header/tabs out of view.
+	// header(1) + tabs(1) + panel border(2) + meta(1)
 	reserved := 5
-	if !m.ultraCompact {
+	if !m.ultraCompact && !m.helpVisible && !m.shouldInlineHotkeys() {
+		// one extra row for condensed key hints when not inlined with state
 		reserved++
 	}
 	if m.status != "" {
@@ -841,11 +1251,19 @@ func (m *tuiModel) resizeListsForViewport() {
 	if m.mode == "compartments" && m.crumb != "" {
 		reserved++
 	}
+	if m.activeListFilterState() == list.Unfiltered {
+		// Reserve space for ghost filter hint + optional breathing line.
+		reserved++
+		if m.height >= 18 {
+			reserved++
+		}
+	}
 
 	panelInnerHeight := m.height - reserved
 	if panelInnerHeight < 4 {
 		panelInnerHeight = 4
 	}
+	m.panelInnerHeight = panelInnerHeight
 
 	m.list.SetSize(panelInnerWidth, panelInnerHeight)
 	m.tenancies.SetSize(panelInnerWidth, panelInnerHeight)
@@ -854,29 +1272,19 @@ func (m *tuiModel) resizeListsForViewport() {
 }
 
 func (m *tuiModel) refreshDelegates() {
-	m.list.SetDelegate(newContextDelegate(&m.pendingContextName, m.ultraCompact))
-	m.tenancies.SetDelegate(newTenancyDelegate(&m.pendingTenancyOCID, m.ultraCompact))
-	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID, m.ultraCompact))
-	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion, m.ultraCompact))
+	m.list.SetDelegate(newContextDelegate(&m.pendingContextName, &m.savedContextName, m.ultraCompact || !m.isModeVerbose("contexts")))
+	m.tenancies.SetDelegate(newTenancyDelegate(&m.pendingTenancyOCID, &m.savedTenancyOCID, m.ultraCompact || !m.isModeVerbose("tenancies")))
+	m.comps.SetDelegate(newCompDelegate(&m.pendingSelectionID, &m.savedCompartmentID, m.ultraCompact || !m.isModeVerbose("compartments")))
+	m.regions.SetDelegate(newRegionDelegate(&m.pendingRegion, &m.savedRegion, m.ultraCompact || !m.isModeVerbose("regions")))
 	m.applyDensityMode()
 }
 
 func (m *tuiModel) applyDensityMode() {
-	if m.ultraCompact {
-		m.list.Title = ""
-		m.tenancies.Title = ""
-		m.comps.Title = ""
-		m.regions.Title = ""
-		return
-	}
-	m.list.Title = "Select OCI context"
-	m.tenancies.Title = "Select tenancy"
-	if m.parentCrumb != "" {
-		m.comps.Title = fmt.Sprintf("Select compartment under %s", m.parentCrumb)
-	} else {
-		m.comps.Title = "Select compartment (lazy load)"
-	}
-	m.regions.Title = "Select region"
+	// Keep list titles hidden; tabs/header already provide context and this saves vertical space.
+	m.list.Title = ""
+	m.tenancies.Title = ""
+	m.comps.Title = ""
+	m.regions.Title = ""
 }
 
 // selectInitialContext picks the current context if present, else the first context item.
@@ -941,10 +1349,15 @@ func (m *tuiModel) applyStartMode(startMode string) {
 
 // goUpOne navigates to the known parent using recorded parent relationships.
 func (m tuiModel) goUpOne() (tea.Model, tea.Cmd) {
-	// If already at tenancy root, go back to contexts instead of reloading root.
+	// If already at tenancy root, go back to tenancies instead of reloading root.
 	if m.parentID == m.ctxItem.TenancyOCID {
-		m.mode = "contexts"
-		m.status = ""
+		if len(m.tenancies.Items()) > 0 {
+			m.mode = "tenancies"
+			m.status = "Select tenancy (Enter to use a profile and open root)"
+		} else {
+			m.mode = "contexts"
+			m.status = ""
+		}
 		m.crumb = ""
 		return m, nil
 	}
@@ -964,6 +1377,99 @@ func (m tuiModel) goUpOne() (tea.Model, tea.Cmd) {
 	return m, m.loadCompsCmd(m.parentID)
 }
 
+func (m tuiModel) ensureActiveContext() (tuiModel, bool) {
+	if m.ctxItem != (contextItem{}) {
+		return m, true
+	}
+	if item, ok := m.list.SelectedItem().(contextItem); ok {
+		m.ctxItem = item
+		return m, true
+	}
+	if ctx, ok := selectInitialContext(m.list.Items(), m.cfg.CurrentContext); ok {
+		m.ctxItem = ctx
+		return m, true
+	}
+	return m, false
+}
+
+func (m tuiModel) switchToMenu(target string) (tuiModel, tea.Cmd, bool) {
+	switch target {
+	case "contexts":
+		m.mode = "contexts"
+		m.status = ""
+		m.crumb = ""
+		return m, nil, true
+	case "tenancies":
+		if len(m.tenancies.Items()) == 0 {
+			return m, nil, false
+		}
+		m.mode = "tenancies"
+		m.status = "Select tenancy (Enter to use a profile and open root)"
+		return m, nil, true
+	case "compartments":
+		var ok bool
+		m, ok = m.ensureActiveContext()
+		if !ok {
+			return m, nil, false
+		}
+		parent := m.ctxItem.CompartmentOCID
+		if parent == "" {
+			parent = m.ctxItem.TenancyOCID
+		}
+		m.parentMap = make(map[string]string)
+		m.nameMap = make(map[string]string)
+		m.parentID = parent
+		m.parentCrumb = parentLabel(parent, m.ctxItem)
+		m.parentMap[parent] = m.ctxItem.TenancyOCID
+		m.nameMap[parent] = m.parentCrumb
+		m.nameMap[m.ctxItem.TenancyOCID] = parentLabel(m.ctxItem.TenancyOCID, m.ctxItem)
+		m.mode = "compartments"
+		m.status = "Loading compartments..."
+		m.crumb = fmt.Sprintf("Current: %s (%s)", m.parentCrumb, parent)
+		return m, m.loadCompsCmd(parent), true
+	case "regions":
+		var ok bool
+		m, ok = m.ensureActiveContext()
+		if !ok {
+			return m, nil, false
+		}
+		m.mode = "regions"
+		m.status = "Loading regions..."
+		if cached, exists := m.regionCache[m.ctxItem.Name]; exists {
+			m.regions.SetItems(toRegionList(cached))
+			m.regions.Select(0)
+			m.status = "Select region (Space to stage, Ctrl+S to save)"
+			return m, nil, true
+		}
+		return m, m.loadRegionsCmd(m.ctxItem), true
+	default:
+		return m, nil, false
+	}
+}
+
+func (m tuiModel) cycleMenu(forward bool) (tea.Model, tea.Cmd) {
+	order := []string{"contexts", "tenancies", "compartments", "regions"}
+	cur := 0
+	for i, mode := range order {
+		if mode == m.mode {
+			cur = i
+			break
+		}
+	}
+	for step := 1; step <= len(order); step++ {
+		next := (cur + step) % len(order)
+		if !forward {
+			next = (cur - step + len(order)) % len(order)
+		}
+		nextMode := order[next]
+		nm, cmd, ok := m.switchToMenu(nextMode)
+		if ok {
+			return nm, cmd
+		}
+	}
+	return m, nil
+}
+
 func (m tuiModel) Init() tea.Cmd {
 	return m.initCmd
 }
@@ -978,61 +1484,24 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.resizeListsForViewport()
 	case tea.KeyMsg:
-		// If currently filtering, route all keys except Enter through the active list to avoid triggering hotkeys.
-		if m.mode == "contexts" && m.list.FilterState() == list.Filtering && msg.String() != "enter" {
-			m.list, cmd = m.list.Update(msg)
-			return m, cmd
+		// In wide mode, navigate active list as a grid with arrows or vim keys.
+		if m.shouldUseGridLayout() && m.moveActiveSelectionGrid(msg.String()) {
+			return m, nil
 		}
-		if m.mode == "tenancies" && m.tenancies.FilterState() == list.Filtering && msg.String() != "enter" {
-			m.tenancies, cmd = m.tenancies.Update(msg)
-			return m, cmd
-		}
-		if m.mode == "compartments" && m.comps.FilterState() == list.Filtering && msg.String() != "enter" {
-			m.comps, cmd = m.comps.Update(msg)
-			return m, cmd
-		}
-		if m.mode == "regions" && m.regions.FilterState() == list.Filtering && msg.String() != "enter" {
-			m.regions, cmd = m.regions.Update(msg)
-			return m, cmd
+
+		// While actively typing a filter, defer all keys to the list component.
+		if m.activeListFilterState() == list.Filtering {
+			return m.updateActiveList(msg)
 		}
 
 		switch msg.String() {
+		case "tab":
+			return m.cycleMenu(true)
+		case "shift+tab":
+			return m.cycleMenu(false)
 		case "enter", "right":
-			// If currently filtering, apply the filtered subset and exit filter mode before acting.
-			if m.mode == "contexts" && m.list.FilterState() == list.Filtering {
-				vis := m.list.VisibleItems()
-				m.list.SetItems(vis)
-				m.list.SetFilteringEnabled(false)
-				if len(vis) > 0 {
-					m.list.Select(0)
-				}
-				return m, nil
-			}
-			if m.mode == "tenancies" && m.tenancies.FilterState() == list.Filtering {
-				vis := m.tenancies.VisibleItems()
-				m.tenancies.SetItems(vis)
-				m.tenancies.SetFilteringEnabled(false)
-				if len(vis) > 0 {
-					m.tenancies.Select(0)
-				}
-				return m, nil
-			}
-			if m.mode == "compartments" && m.comps.FilterState() == list.Filtering {
-				vis := m.comps.VisibleItems()
-				m.comps.SetItems(vis)
-				m.comps.SetFilteringEnabled(false)
-				if len(vis) > 0 {
-					m.comps.Select(0)
-				}
-				return m, nil
-			}
-			if m.mode == "regions" && m.regions.FilterState() == list.Filtering {
-				vis := m.regions.VisibleItems()
-				m.regions.SetItems(vis)
-				m.regions.SetFilteringEnabled(false)
-				if len(vis) > 0 {
-					m.regions.Select(0)
-				}
+			if m.activeListFilterState() == list.FilterApplied && m.mode != "compartments" {
+				// Don't drill on enter while a filter is applied; use '/' to edit filter or Esc to clear.
 				return m, nil
 			}
 			if m.mode == "contexts" {
@@ -1101,7 +1570,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.comps.Items()) == 0 {
 					return m.finalizeSelection()
 				}
-				if item, ok := m.comps.SelectedItem().(compItem); ok {
+				if item, ok := asCompItem(m.comps.SelectedItem()); ok {
+					// On drill, clear any applied compartment filter so the child level starts unfiltered.
+					if m.comps.FilterState() == list.FilterApplied {
+						m.comps.SetFilterText("")
+						m.comps.SetFilterState(list.Unfiltered)
+						m.comps.SetShowFilter(false)
+					}
 					m.parentID = item.oc.ID
 					m.parentCrumb = item.oc.Name
 					m.nameMap[item.oc.ID] = item.oc.Name
@@ -1128,6 +1603,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Space acts per mode: mark pending selection with highlight and allow quick save.
 			if m.mode == "contexts" {
 				if item, ok := m.list.SelectedItem().(contextItem); ok {
+					if m.pendingContextName == item.Name {
+						m.pendingContextName = ""
+						m.status = fmt.Sprintf("Context %s unstaged", item.Name)
+						return m, nil
+					}
 					m.ctxItem = item
 					m.pendingContextName = item.Name
 					m.pendingSelectionID = ""
@@ -1146,7 +1626,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.mode == "tenancies" {
 				if item, ok := m.tenancies.SelectedItem().(tenancyItem); ok {
+					if m.pendingTenancyOCID == item.TenancyOCID {
+						m.pendingTenancyOCID = ""
+						m.autoStagedTenancy = false
+						m.status = fmt.Sprintf("Tenancy %s unstaged", abbreviateOCID(item.TenancyOCID))
+						return m, nil
+					}
 					m.pendingTenancyOCID = item.TenancyOCID
+					m.autoStagedTenancy = false
 					profileName := selectProfileForTenancy(item, m.profiles, m.cfg.Options.DefaultProfile)
 					p, ok := m.profiles[profileName]
 					if ok {
@@ -1163,19 +1650,34 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.mode == "compartments" {
-				if item, ok := m.comps.SelectedItem().(compItem); ok {
-					m.parentID = item.oc.ID
-					m.parentCrumb = item.oc.Name
-					m.nameMap[item.oc.ID] = item.oc.Name
-					m.parentMap[item.oc.ID] = item.oc.Parent
+				if item, ok := asCompItem(m.comps.SelectedItem()); ok {
+					if m.pendingSelectionID == item.oc.ID {
+						m.pendingSelectionID = ""
+						m.pendingSelectionNm = ""
+						if m.autoStagedTenancy {
+							m.pendingTenancyOCID = ""
+							m.autoStagedTenancy = false
+						}
+						m.status = fmt.Sprintf("Compartment %s unstaged", item.oc.Name)
+						return m, nil
+					}
 					m.pendingSelectionID = item.oc.ID
 					m.pendingSelectionNm = item.oc.Name
+					if m.pendingTenancyOCID == "" && m.ctxItem.TenancyOCID != "" {
+						m.pendingTenancyOCID = m.ctxItem.TenancyOCID
+						m.autoStagedTenancy = true
+					}
 					m.status = fmt.Sprintf("Selected %s (pending save; Enter/right to drill, Ctrl+S/q to save)", item.oc.Name)
 				}
 				return m, nil
 			}
 			if m.mode == "regions" {
 				if item, ok := m.regions.SelectedItem().(regionItem); ok {
+					if m.pendingRegion == item.name {
+						m.pendingRegion = ""
+						m.status = fmt.Sprintf("Region %s unstaged", item.name)
+						return m, nil
+					}
 					m.ctxItem.Region = item.name
 					m.regionSet = true
 					m.pendingRegion = item.name
@@ -1188,7 +1690,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.saveAndQuitCurrentMode()
 		case "q":
 			return m.saveAndQuitCurrentMode()
-		case "esc", "ctrl+c":
+		case "esc":
+			if m.activeListFilterState() == list.FilterApplied {
+				m.clearActiveAppliedFilter()
+				m.status = "Filter cleared"
+				return m, nil
+			}
+			return m, tea.Quit
+		case "ctrl+c":
 			// Exit without saving on explicit quit keys.
 			return m, tea.Quit
 		case "b":
@@ -1334,32 +1843,73 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.list.SetFilteringEnabled(true)
 				m.list.SetFilterText("")
 				m.list.SetFilterState(list.Filtering)
+				m.list.SetShowFilter(true)
 			}
 			if m.mode == "compartments" {
 				m.comps.SetFilteringEnabled(true)
 				m.comps.SetFilterText("")
 				m.comps.SetFilterState(list.Filtering)
+				m.comps.SetShowFilter(true)
 			}
 			if m.mode == "tenancies" {
 				m.tenancies.SetFilteringEnabled(true)
 				m.tenancies.SetFilterText("")
 				m.tenancies.SetFilterState(list.Filtering)
+				m.tenancies.SetShowFilter(true)
 			}
 			if m.mode == "regions" {
 				m.regions.SetFilteringEnabled(true)
 				m.regions.SetFilterText("")
 				m.regions.SetFilterState(list.Filtering)
+				m.regions.SetShowFilter(true)
 			}
 			return m, nil
-		case "u":
-			m.ultraCompact = !m.ultraCompact
-			m.applyDensityMode()
-			m.resizeListsForViewport()
-			if m.ultraCompact {
-				m.status = "ULTRA mode: ON"
+		case "?":
+			m.helpVisible = !m.helpVisible
+			if m.helpVisible {
+				m.status = "Keybindings help: ON"
 			} else {
-				m.status = "ULTRA mode: OFF"
+				m.status = "Keybindings help: OFF"
 			}
+			return m, nil
+		case "v":
+			if m.layoutOverride == "matrix" || m.shouldUseGridLayout() {
+				m.setModeVerbose(m.mode, true)
+				m.layoutOverride = "list"
+				if m.mode == "contexts" {
+					m.refreshContextMenuItems()
+				}
+				m.refreshDelegates()
+				m.resizeListsForViewport()
+				m.status = fmt.Sprintf("Verbose ON for %s (list)", m.mode)
+				return m, nil
+			}
+			next := !m.isModeVerbose(m.mode)
+			m.setModeVerbose(m.mode, next)
+			if m.mode == "contexts" {
+				m.refreshContextMenuItems()
+			}
+			m.refreshDelegates()
+			m.resizeListsForViewport()
+			m.status = fmt.Sprintf("Verbose %s for %s (session)", onOff(next), m.mode)
+			return m, nil
+		case "m":
+			if m.layoutOverride == "matrix" || m.shouldUseGridLayout() {
+				m.layoutOverride = "list"
+				m.status = "Layout list (session)"
+			} else {
+				m.layoutOverride = "matrix"
+				m.setModeVerbose(m.mode, false)
+				if m.mode == "contexts" {
+					m.refreshContextMenuItems()
+				}
+				m.refreshDelegates()
+				m.resizeListsForViewport()
+				m.status = "Layout matrix + verbose OFF (session)"
+				return m, nil
+			}
+			m.refreshDelegates()
+			m.resizeListsForViewport()
 			return m, nil
 		}
 	}
@@ -1403,6 +1953,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == "contexts" {
 		m.list, cmd = m.list.Update(msg)
+		if km, ok := msg.(tea.KeyMsg); ok && isVerticalNavKey(km.String()) {
+			m.skipNonContextRows(navDirection(km.String()))
+		}
 		return m, cmd
 	}
 	if m.mode == "tenancies" {
@@ -1419,6 +1972,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) View() string {
 	m.refreshDelegates()
+	m.resizeListsForViewport()
 	if m.err != nil {
 		return m.theme.panel.Render(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true).Render(fmt.Sprintf("error: %v", m.err)))
 	}
@@ -1426,6 +1980,13 @@ func (m tuiModel) View() string {
 		return fmt.Sprintf("Selected context %s with compartment %s\n", m.ctxItem.Name, m.parentID)
 	}
 	panelContent := m.activeListView()
+	if m.activeListFilterState() == list.Unfiltered {
+		gap := "\n"
+		if m.height >= 18 {
+			gap = "\n\n"
+		}
+		panelContent = m.theme.statusMuted.Render("Filter: press / to filter") + gap + panelContent
+	}
 	if m.mode == "compartments" && m.crumb != "" {
 		panelContent = m.theme.statusMuted.Render(m.crumb) + "\n" + panelContent
 	}
@@ -1436,10 +1997,19 @@ func (m tuiModel) View() string {
 		m.theme.panel.Render(panelContent),
 	}
 
-	if !m.ultraCompact {
-		lines = append(lines, m.theme.instructions.Render(modeInstructions(m.mode, m.width > 0 && m.width < 72)))
+	if !m.ultraCompact && m.helpVisible {
+		lines = append(lines, m.theme.panel.Render(m.renderHelpPanel()))
 	}
-	lines = append(lines, m.renderMetaLine())
+
+	if m.shouldInlineHotkeys() {
+		lines = append(lines, m.renderMetaLineWithHotkeys())
+	} else {
+		if !m.ultraCompact && !m.helpVisible {
+			lines = append(lines, m.theme.instructions.Render(primaryHotkeys(m.width > 0 && m.width < 72)))
+		}
+		lines = append(lines, m.renderMetaLine())
+	}
+
 	if m.status != "" {
 		lines = append(lines, m.renderStatusLine())
 	}
@@ -1463,26 +2033,476 @@ func (m tuiModel) renderStatusLine() string {
 }
 
 func (m tuiModel) activeListView() string {
+	if m.shouldUseGridLayout() {
+		return m.renderActiveGrid()
+	}
 	switch m.mode {
 	case "contexts":
-		return m.list.View()
+		l := m.list
+		if l.FilterState() == list.Unfiltered {
+			l.SetShowFilter(false)
+		} else {
+			l.SetShowFilter(true)
+		}
+		return l.View()
 	case "tenancies":
-		return m.tenancies.View()
+		l := m.tenancies
+		if l.FilterState() == list.Unfiltered {
+			l.SetShowFilter(false)
+		} else {
+			l.SetShowFilter(true)
+		}
+		return l.View()
 	case "regions":
-		return m.regions.View()
+		l := m.regions
+		if l.FilterState() == list.Unfiltered {
+			l.SetShowFilter(false)
+		} else {
+			l.SetShowFilter(true)
+		}
+		return l.View()
 	default:
-		return m.comps.View()
+		l := m.comps
+		if l.FilterState() == list.Unfiltered {
+			l.SetShowFilter(false)
+		} else {
+			l.SetShowFilter(true)
+		}
+		return l.View()
 	}
 }
 
-func (m tuiModel) renderHeader() string {
-	left := m.theme.headerTitle.Render("OCI Context")
-	if m.width > 0 && m.width < 64 {
-		return left
+func (m tuiModel) activeListModel() list.Model {
+	switch m.mode {
+	case "contexts":
+		return m.list
+	case "tenancies":
+		return m.tenancies
+	case "regions":
+		return m.regions
+	default:
+		return m.comps
 	}
-	mode := strings.ToUpper(m.mode)
-	right := m.theme.headerSubtle.Render("Dashboard • " + mode)
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+}
+
+func (m tuiModel) activeListFilterState() list.FilterState {
+	switch m.mode {
+	case "contexts":
+		return m.list.FilterState()
+	case "tenancies":
+		return m.tenancies.FilterState()
+	case "regions":
+		return m.regions.FilterState()
+	default:
+		return m.comps.FilterState()
+	}
+}
+
+func (m *tuiModel) clearActiveAppliedFilter() {
+	l := m.activeListModel()
+	l.SetFilterText("")
+	l.SetFilterState(list.Unfiltered)
+	l.SetShowFilter(false)
+	m.setActiveListModel(l)
+}
+
+func (m tuiModel) updateActiveList(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	l := m.activeListModel()
+	l, cmd = l.Update(msg)
+	if l.FilterState() == list.Unfiltered {
+		l.SetShowFilter(false)
+	} else {
+		l.SetShowFilter(true)
+	}
+	m.setActiveListModel(l)
+	if km, ok := msg.(tea.KeyMsg); ok && m.mode == "contexts" && isVerticalNavKey(km.String()) {
+		m.skipNonContextRows(navDirection(km.String()))
+	}
+	return m, cmd
+}
+
+func (m *tuiModel) setActiveListModel(l list.Model) {
+	switch m.mode {
+	case "contexts":
+		m.list = l
+	case "tenancies":
+		m.tenancies = l
+	case "regions":
+		m.regions = l
+	default:
+		m.comps = l
+	}
+}
+
+func isVerticalNavKey(key string) bool {
+	switch key {
+	case "up", "k", "ctrl+p", "pgup", "down", "j", "ctrl+n", "pgdown":
+		return true
+	default:
+		return false
+	}
+}
+
+func navDirection(key string) int {
+	switch key {
+	case "up", "k", "ctrl+p", "pgup":
+		return -1
+	default:
+		return 1
+	}
+}
+
+func (m *tuiModel) skipNonContextRows(dir int) {
+	items := m.list.Items()
+	if len(items) == 0 {
+		return
+	}
+	idx := m.list.Index()
+	if idx < 0 || idx >= len(items) {
+		return
+	}
+	if _, ok := items[idx].(contextItem); ok {
+		return
+	}
+
+	// First try moving in the user's requested direction.
+	for i := idx + dir; i >= 0 && i < len(items); i += dir {
+		if _, ok := items[i].(contextItem); ok {
+			m.list.Select(i)
+			return
+		}
+	}
+	// Fallback to the opposite direction if we hit an edge.
+	for i := idx - dir; i >= 0 && i < len(items); i -= dir {
+		if _, ok := items[i].(contextItem); ok {
+			m.list.Select(i)
+			return
+		}
+	}
+}
+
+func (m tuiModel) isFilteringActive() bool {
+	switch m.mode {
+	case "contexts":
+		return m.list.FilterState() != list.Unfiltered
+	case "tenancies":
+		return m.tenancies.FilterState() != list.Unfiltered
+	case "regions":
+		return m.regions.FilterState() != list.Unfiltered
+	default:
+		return m.comps.FilterState() != list.Unfiltered
+	}
+}
+
+func (m tuiModel) isModeVerbose(mode string) bool {
+	switch mode {
+	case "contexts":
+		return m.prefs.VerboseContexts
+	case "tenancies":
+		return m.prefs.VerboseTenancies
+	case "regions":
+		return m.prefs.VerboseRegions
+	default:
+		return m.prefs.VerboseCompartments
+	}
+}
+
+func (m *tuiModel) setModeVerbose(mode string, v bool) {
+	switch mode {
+	case "contexts":
+		m.prefs.VerboseContexts = v
+	case "tenancies":
+		m.prefs.VerboseTenancies = v
+	case "regions":
+		m.prefs.VerboseRegions = v
+	default:
+		m.prefs.VerboseCompartments = v
+	}
+}
+
+func onOff(v bool) string {
+	if v {
+		return "ON"
+	}
+	return "OFF"
+}
+
+func (m tuiModel) shouldUseGridLayout() bool {
+	if m.layoutOverride == "matrix" {
+		return m.gridAllowedInCurrentState()
+	}
+	if m.layoutOverride == "list" {
+		return false
+	}
+	return m.effectiveGridLayout()
+}
+
+func (m tuiModel) effectiveGridLayout() bool {
+	if !m.gridAllowedInCurrentState() {
+		return false
+	}
+	if m.isModeVerbose(m.mode) {
+		return false
+	}
+	return m.panelInnerHeight >= 3
+}
+
+func (m tuiModel) gridAllowedInCurrentState() bool {
+	if m.ultraCompact || m.helpVisible || m.width < 96 || m.isFilteringActive() {
+		return false
+	}
+	return len(m.activeGridItems()) > 0
+}
+
+func (m tuiModel) gridColumnsForCount(count int) int {
+	if count <= 0 {
+		return 1
+	}
+	colWidth := 32
+	cols := m.width / colWidth
+	if cols < 2 {
+		cols = 2
+	}
+	if cols > 4 {
+		cols = 4
+	}
+	if cols > count {
+		cols = count
+	}
+	return cols
+}
+
+func (m *tuiModel) moveActiveSelectionGrid(key string) bool {
+	mapIdx := m.activeGridIndexMap()
+	items := m.activeGridItems()
+	var delta int
+	switch key {
+	case "left", "h":
+		delta = -1
+	case "right", "l":
+		delta = 1
+	case "up", "k":
+		delta = -m.gridColumnsForCount(len(items))
+	case "down", "j":
+		delta = m.gridColumnsForCount(len(items))
+	default:
+		return false
+	}
+
+	l := m.activeListModel()
+	if len(items) == 0 || len(mapIdx) == 0 {
+		return false
+	}
+	curList := l.Index()
+	pos := 0
+	for i, li := range mapIdx {
+		if li == curList {
+			pos = i
+			break
+		}
+	}
+	nextPos := pos + delta
+	if nextPos < 0 || nextPos >= len(items) {
+		return true
+	}
+	l.Select(mapIdx[nextPos])
+	m.setActiveListModel(l)
+	return true
+}
+
+func (m tuiModel) renderActiveGrid() string {
+	l := m.activeListModel()
+	idxMap := m.activeGridIndexMap()
+	items := m.activeGridItems()
+	if len(items) == 0 || len(idxMap) == 0 {
+		return ""
+	}
+
+	cols := m.gridColumnsForCount(len(items))
+	cellW := (m.width - 8) / cols
+	if cellW < 18 {
+		cellW = 18
+	}
+	totalRows := (len(items) + cols - 1) / cols
+	visibleRows := m.panelInnerHeight
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+
+	selectedPos := 0
+	for i, li := range idxMap {
+		if li == l.Index() {
+			selectedPos = i
+			break
+		}
+	}
+	selectedRow := selectedPos / cols
+
+	// If we have profile+context groups and enough vertical room, render as stacked matrices.
+	if m.mode == "contexts" {
+		split := 0
+		for i, it := range items {
+			if ci, ok := it.(contextItem); ok && ci.fromSaved {
+				split = i
+				break
+			}
+		}
+		if split > 0 && split < len(items) {
+			rowsTop := (split + cols - 1) / cols
+			rowsBottom := (len(items) - split + cols - 1) / cols
+			if rowsTop+rowsBottom+1 <= visibleRows {
+				top := m.renderGridRows(items[:split], cols, cellW, selectedPos, 0, rowsTop)
+				bottom := m.renderGridRows(items[split:], cols, cellW, selectedPos, split, rowsBottom)
+				divider := lipgloss.NewStyle().Foreground(panelColor).Render(strings.Repeat("─", max(12, m.width-8)))
+				return strings.Join(append(append(top, divider), bottom...), "\n")
+			}
+		}
+	}
+
+	startRow := 0
+	if totalRows > visibleRows {
+		startRow = selectedRow - (visibleRows / 2)
+		if startRow < 0 {
+			startRow = 0
+		}
+		maxStart := totalRows - visibleRows
+		if startRow > maxStart {
+			startRow = maxStart
+		}
+	}
+	endRow := startRow + visibleRows
+	if endRow > totalRows {
+		endRow = totalRows
+	}
+
+	lines := m.renderGridRows(items, cols, cellW, selectedPos, 0, endRow-startRow)
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) activeGridItems() []list.Item {
+	l := m.activeListModel()
+	base := l.Items()
+	out := make([]list.Item, 0, len(base))
+	for _, it := range base {
+		if _, sep := it.(separatorItem); sep {
+			continue
+		}
+		if _, sec := it.(sectionItem); sec {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+func (m tuiModel) activeGridIndexMap() []int {
+	l := m.activeListModel()
+	base := l.Items()
+	out := make([]int, 0, len(base))
+	for i, it := range base {
+		if _, sep := it.(separatorItem); sep {
+			continue
+		}
+		if _, sec := it.(sectionItem); sec {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out
+}
+
+func (m tuiModel) renderGridRows(items []list.Item, cols, cellW, selectedPos, offset, rows int) []string {
+	lines := make([]string, 0, rows)
+	totalRows := (len(items) + cols - 1) / cols
+	if rows > totalRows {
+		rows = totalRows
+	}
+	for row := 0; row < rows; row++ {
+		i := row * cols
+		cells := make([]string, 0, cols)
+		for c := 0; c < cols; c++ {
+			idx := i + c
+			if idx >= len(items) {
+				cells = append(cells, lipgloss.NewStyle().Width(cellW).Render(""))
+				continue
+			}
+			title := itemTitle(items[idx])
+			staged := m.isStagedItem(items[idx])
+			current := m.isCurrentSavedItem(items[idx])
+			if staged {
+				if m.ultraCompact {
+					title = "[*] " + title
+				} else {
+					title = title + " " + m.theme.gridStaged.Render("●")
+				}
+			} else if current && !m.ultraCompact {
+				title = title + " " + m.theme.gridCurrent.Render("●")
+			}
+			globalPos := offset + idx
+			if globalPos == selectedPos {
+				cells = append(cells, m.theme.gridSelected.Width(cellW).Render(title))
+			} else {
+				cells = append(cells, m.theme.gridCell.Width(cellW).Render(title))
+			}
+		}
+		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, cells...))
+	}
+	return lines
+}
+
+func (m tuiModel) isStagedItem(item list.Item) bool {
+	switch m.mode {
+	case "contexts":
+		if ci, ok := item.(contextItem); ok {
+			return m.pendingContextName != "" && ci.Name == m.pendingContextName
+		}
+	case "tenancies":
+		if ti, ok := item.(tenancyItem); ok {
+			return m.pendingTenancyOCID != "" && ti.TenancyOCID == m.pendingTenancyOCID
+		}
+	case "regions":
+		if ri, ok := item.(regionItem); ok {
+			return m.pendingRegion != "" && ri.name == m.pendingRegion
+		}
+	default:
+		if ci, ok := item.(compItem); ok {
+			return m.pendingSelectionID != "" && ci.oc.ID == m.pendingSelectionID
+		}
+	}
+	return false
+}
+
+func (m tuiModel) isCurrentSavedItem(item list.Item) bool {
+	switch m.mode {
+	case "contexts":
+		if ci, ok := item.(contextItem); ok {
+			return m.savedContextName != "" && ci.Name == m.savedContextName
+		}
+	case "tenancies":
+		if ti, ok := item.(tenancyItem); ok {
+			return m.savedTenancyOCID != "" && ti.TenancyOCID == m.savedTenancyOCID
+		}
+	case "regions":
+		if ri, ok := item.(regionItem); ok {
+			return m.savedRegion != "" && ri.name == m.savedRegion
+		}
+	default:
+		if ci, ok := item.(compItem); ok {
+			return m.savedCompartmentID != "" && ci.oc.ID == m.savedCompartmentID
+		}
+	}
+	return false
+}
+
+func (m tuiModel) renderHeader() string {
+	mode := strings.ToUpper(displayModeName(m.mode))
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.theme.headerTitle.Render("OCI Context"),
+		" ",
+		m.theme.headerSubtle.Render("• "+mode),
+	)
 }
 
 func (m tuiModel) renderTabs() string {
@@ -1491,7 +2511,7 @@ func (m tuiModel) renderTabs() string {
 		mode  string
 		label string
 	}{
-		{mode: "contexts", label: "Contexts"},
+		{mode: "contexts", label: "Profiles"},
 		{mode: "tenancies", label: "Tenancies"},
 		{mode: "compartments", label: "Compartments"},
 		{mode: "regions", label: "Regions"},
@@ -1501,7 +2521,7 @@ func (m tuiModel) renderTabs() string {
 			mode  string
 			label string
 		}{
-			{mode: "contexts", label: "Ctx"},
+			{mode: "contexts", label: "Prof"},
 			{mode: "tenancies", label: "Ten"},
 			{mode: "compartments", label: "Comp"},
 			{mode: "regions", label: "Reg"},
@@ -1511,6 +2531,9 @@ func (m tuiModel) renderTabs() string {
 	rendered := make([]string, 0, len(labels))
 	for _, tab := range labels {
 		label := tab.label
+		if m.isModeStaged(tab.mode) {
+			label += " " + lipgloss.NewStyle().Foreground(stagedColor).Bold(true).Render("●")
+		}
 		if tab.mode == m.mode {
 			rendered = append(rendered, m.theme.tabActive.Render(label))
 			continue
@@ -1518,6 +2541,19 @@ func (m tuiModel) renderTabs() string {
 		rendered = append(rendered, m.theme.tabInactive.Render(label))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+}
+
+func (m tuiModel) isModeStaged(mode string) bool {
+	switch mode {
+	case "contexts":
+		return m.pendingContextName != ""
+	case "tenancies":
+		return m.pendingTenancyOCID != ""
+	case "regions":
+		return m.pendingRegion != ""
+	default:
+		return m.pendingSelectionID != ""
+	}
 }
 
 func (m tuiModel) renderMetaLine() string {
@@ -1539,29 +2575,90 @@ func (m tuiModel) renderMetaLine() string {
 	))
 }
 
-func modeInstructions(mode string, compact bool) string {
+func (m tuiModel) renderMetaLineWithHotkeys() string {
+	meta := inlineStateSummary(m)
+	hotkeys := primaryHotkeys(m.width > 0 && m.width < 90)
+	return m.theme.metaBar.Render(lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.theme.metaLabel.Render("state "),
+		m.theme.metaValue.Render(meta),
+		m.theme.metaLabel.Render("  keys "),
+		m.theme.instructions.Render(hotkeys),
+	))
+}
+
+func (m tuiModel) shouldInlineHotkeys() bool {
+	if m.ultraCompact || m.helpVisible {
+		return false
+	}
+	if m.width <= 0 {
+		return false
+	}
+	// Keep one-line state+keys only when the full rendered content fits.
+	meta := inlineStateSummary(m)
+	hotkeys := primaryHotkeys(m.width > 0 && m.width < 90)
+	required := lipgloss.Width("state " + meta + "  keys " + hotkeys)
+	// Small safety margin for terminal/padding variances.
+	return m.width >= required+2
+}
+
+func primaryHotkeys(compact bool) string {
 	if compact {
-		switch mode {
-		case "contexts":
-			return "enter drill • space stage • r/t switch • / filter • q save"
-		case "tenancies":
-			return "enter use • space stage • back/P • / filter • q save"
-		case "regions":
-			return "space stage • enter apply • back/P • / filter • q save"
-		default:
-			return "enter drill • space stage • back up • / filter • q save"
+		return "enter/backspace drill/up • space stage • / filter • v verbose • m matrix • q save • ? help"
+	}
+	return "enter/backspace drill/up • space stage • / filter • v verbose • m matrix • q save • ? help"
+}
+
+func inlineStateSummary(m tuiModel) string {
+	current := m.ctxItem.Name
+	if current == "" {
+		current = m.cfg.CurrentContext
+	}
+	if current == "" {
+		current = "-"
+	}
+	layout := "list"
+	if m.shouldUseGridLayout() {
+		layout = "matrix"
+	}
+	detail := "compact"
+	if m.isModeVerbose(m.mode) {
+		detail = "verbose"
+	}
+	return fmt.Sprintf("current:%s | layout:%s | detail:%s", current, layout, detail)
+}
+
+func displayModeName(mode string) string {
+	if mode == "contexts" {
+		return "profiles"
+	}
+	return mode
+}
+
+func (m tuiModel) renderHelpPanel() string {
+	lines := []string{
+		"Keys",
+		"Enter/right: drill or apply",
+		"Space: stage selection",
+		"Ctrl+S or q: save and quit",
+		"Esc or Ctrl+C: quit without saving",
+		"/: filter current list",
+		"v: toggle verbose view for current mode",
+		"m: toggle matrix layout for current session",
+		"Backspace/delete: go up/back (when not filtering)",
+		"?: toggle this help panel",
+		"",
+		"Mode Navigation",
+		"profiles: r regions • c compartments • t tenancies",
+		"submenus: R regions • C compartments • T tenancies • P profiles",
+	}
+	if m.width > 0 && m.width < 72 {
+		lines = []string{
+			"Keys: enter drill, space stage, q save, esc quit, / filter, ? help",
+			"Switch: r/c/t in profiles, R/C/T/P in submenus",
 		}
 	}
-	switch mode {
-	case "contexts":
-		return "ctx | enter drill • space stage • r regions • t tenancies • / filter • u ultra • q save • esc quit"
-	case "tenancies":
-		return "tenancy | enter use • space stage • backspace/P back • / filter • u ultra • q save • esc quit"
-	case "regions":
-		return "region | space stage • enter apply+back • backspace/P back • / filter • u ultra • q save • esc quit"
-	default:
-		return "comp | enter drill • space stage • backspace up • / filter • u ultra • q save • esc quit"
-	}
+	return strings.Join(lines, "\n")
 }
 
 func compactMetaNarrow(m tuiModel) string {
@@ -1604,7 +2701,7 @@ func compactMetaNarrow(m tuiModel) string {
 	if current == "" {
 		current = "-"
 	}
-	return fmt.Sprintf("m:%s c:%s s:%s f:%s", m.mode, current, staged, filter)
+	return fmt.Sprintf("c:%s s:%s f:%s", current, staged, filter)
 }
 
 func compactMeta(m tuiModel) string {
@@ -1647,7 +2744,7 @@ func compactMeta(m tuiModel) string {
 	if current == "" {
 		current = "-"
 	}
-	return fmt.Sprintf("mode:%s | current:%s | staged:%s | filter:%s", m.mode, current, staged, filter)
+	return fmt.Sprintf("current:%s | staged:%s | filter:%s", current, staged, filter)
 }
 
 type compResultMsg struct {
@@ -1709,8 +2806,8 @@ func (m tuiModel) saveAndQuitCurrentMode() (tea.Model, tea.Cmd) {
 			parent := ""
 			// If a compartment is staged for the same context that was selected before
 			// this save operation, preserve that staged compartment selection.
-			if m.pendingSelectionID != "" && m.parentID != "" && prevCtxItem.Name == item.Name {
-				parent = m.parentID
+			if m.pendingSelectionID != "" && prevCtxItem.Name == item.Name {
+				parent = m.pendingSelectionID
 			}
 			if parent == "" {
 				parent = item.CompartmentOCID
@@ -1738,6 +2835,12 @@ func (m tuiModel) saveAndQuitCurrentMode() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.mode == "compartments" {
+		if m.pendingSelectionID != "" {
+			m.parentID = m.pendingSelectionID
+			if m.pendingSelectionNm != "" {
+				m.parentCrumb = m.pendingSelectionNm
+			}
+		}
 		return m.finalizeSelection()
 	}
 	if m.mode == "regions" {
@@ -1769,9 +2872,10 @@ func parentLabel(parent string, item contextItem) string {
 // finalizeSelection sets the chosen compartment, saves config, and quits.
 func (m tuiModel) finalizeSelection() (tea.Model, tea.Cmd) {
 	m.finalized = true
-	m.selected = m.ctxItem.Name
 	// persist selection (compartment + region if set)
 	m.ctxItem.CompartmentOCID = m.parentID
+	m.maybeDeriveContextName()
+	m.selected = m.ctxItem.Name
 	// Region persisted by UpsertContext from ctxItem; regionSet already applied
 	m.cfg.CurrentContext = m.ctxItem.Name
 	if err := m.cfg.UpsertContext(m.ctxItem.Context); err != nil {
@@ -1782,7 +2886,44 @@ func (m tuiModel) finalizeSelection() (tea.Model, tea.Cmd) {
 		m.err = err
 		return m, tea.Quit
 	}
+	if err := syncOCIDefaultsForCurrent(m.cfg); err != nil {
+		m.err = err
+		return m, tea.Quit
+	}
 	return m, tea.Quit
+}
+
+func (m *tuiModel) maybeDeriveContextName() {
+	profileName := strings.TrimSpace(m.ctxItem.Profile)
+	if profileName == "" {
+		return
+	}
+	p, ok := m.profiles[profileName]
+	if !ok {
+		return
+	}
+	baseTenancy := p.Tenancy
+	baseRegion := p.Region
+	baseComp := p.Tenancy
+
+	if m.ctxItem.TenancyOCID == baseTenancy && m.ctxItem.Region == baseRegion && m.ctxItem.CompartmentOCID == baseComp {
+		if m.ctxItem.Name == "" {
+			m.ctxItem.Name = profileName
+		}
+		return
+	}
+
+	name := profileName
+	if m.ctxItem.Region != "" {
+		name += "@" + m.ctxItem.Region
+	}
+	if m.ctxItem.TenancyOCID != "" && m.ctxItem.TenancyOCID != baseTenancy {
+		name += ":" + abbreviateOCID(m.ctxItem.TenancyOCID)
+	}
+	if m.ctxItem.CompartmentOCID != "" && m.ctxItem.CompartmentOCID != m.ctxItem.TenancyOCID {
+		name += "/" + abbreviateOCID(m.ctxItem.CompartmentOCID)
+	}
+	m.ctxItem.Name = name
 }
 
 func toList(items []compItem) []list.Item {

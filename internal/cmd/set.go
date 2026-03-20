@@ -58,6 +58,11 @@ func newSetCmd() *cobra.Command {
 			if err := config.Save(path, cfg); err != nil {
 				return err
 			}
+			if name == cfg.CurrentContext {
+				if err := syncOCIDefaultsForCurrent(cfg); err != nil {
+					return err
+				}
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Updated context %s\n", name)
 			return nil
 		},
