@@ -24,6 +24,7 @@ import (
 var (
 	stagedColor      = lipgloss.Color("205")
 	currentColor     = lipgloss.Color("42")
+	selectionBgColor = lipgloss.Color("236")
 	infoColor        = lipgloss.Color("252")
 	accentColor      = lipgloss.Color("45")
 	activeTabColor   = lipgloss.Color("33")
@@ -100,7 +101,7 @@ func newTUITheme() tuiTheme {
 			Padding(0, 1),
 		gridSelected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("230")).
-			Background(activeTabColor).
+			Background(selectionBgColor).
 			Bold(true).
 			Padding(0, 1),
 		gridStaged: lipgloss.NewStyle().
@@ -392,10 +393,12 @@ func applyDelegateTheme(d *list.DefaultDelegate) {
 	normalTitle := lipgloss.NewStyle().Foreground(infoColor)
 	normalDesc := lipgloss.NewStyle().Foreground(mutedTextColor)
 	selectedTitle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("230")).
-		Background(activeTabColor).
+		Foreground(infoColor).
+		Background(selectionBgColor).
 		Bold(true)
-	selectedDesc := lipgloss.NewStyle().Foreground(accentColor)
+	selectedDesc := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("250")).
+		Background(selectionBgColor)
 
 	d.Styles.NormalTitle = normalTitle
 	d.Styles.NormalDesc = normalDesc
