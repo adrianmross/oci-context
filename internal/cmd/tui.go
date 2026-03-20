@@ -736,6 +736,7 @@ type tuiModel struct {
 	pendingContextName string              // context pending name
 	pendingTenancyOCID string              // tenancy pending OCID
 	ultraCompact       bool                // minimal chrome mode
+	helpVisible        bool                // keybindings panel toggle
 	initCmd            tea.Cmd             // optional startup command for shortcut modes
 	theme              tuiTheme
 	width              int
@@ -1351,6 +1352,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.regions.SetFilterState(list.Filtering)
 			}
 			return m, nil
+		case "?":
+			m.helpVisible = !m.helpVisible
+			if m.helpVisible {
+				m.status = "Keybindings help: ON"
+			} else {
+				m.status = "Keybindings help: OFF"
+			}
+			return m, nil
 		case "u":
 			m.ultraCompact = !m.ultraCompact
 			m.applyDensityMode()
@@ -1437,7 +1446,11 @@ func (m tuiModel) View() string {
 	}
 
 	if !m.ultraCompact {
-		lines = append(lines, m.theme.instructions.Render(modeInstructions(m.mode, m.width > 0 && m.width < 72)))
+		if m.helpVisible {
+			lines = append(lines, m.theme.panel.Render(m.renderHelpPanel()))
+		} else {
+			lines = append(lines, m.theme.instructions.Render(modeInstructions(m.mode, m.width > 0 && m.width < 72)))
+		}
 	}
 	lines = append(lines, m.renderMetaLine())
 	if m.status != "" {
@@ -1543,25 +1556,50 @@ func modeInstructions(mode string, compact bool) string {
 	if compact {
 		switch mode {
 		case "contexts":
-			return "enter drill • space stage • r/t switch • / filter • q save"
+			return "enter drill • space stage • r/t switch • / filter • q save • ? help"
 		case "tenancies":
-			return "enter use • space stage • back/P • / filter • q save"
+			return "enter use • space stage • back/P • / filter • q save • ? help"
 		case "regions":
-			return "space stage • enter apply • back/P • / filter • q save"
+			return "space stage • enter apply • back/P • / filter • q save • ? help"
 		default:
-			return "enter drill • space stage • back up • / filter • q save"
+			return "enter drill • space stage • back up • / filter • q save • ? help"
 		}
 	}
 	switch mode {
 	case "contexts":
-		return "ctx | enter drill • space stage • r regions • t tenancies • / filter • u ultra • q save • esc quit"
+		return "enter drill • space stage • r regions • t tenancies • / filter • u ultra • q save • esc quit • ? help"
 	case "tenancies":
-		return "tenancy | enter use • space stage • backspace/P back • / filter • u ultra • q save • esc quit"
+		return "enter use • space stage • backspace/P back • / filter • u ultra • q save • esc quit • ? help"
 	case "regions":
-		return "region | space stage • enter apply+back • backspace/P back • / filter • u ultra • q save • esc quit"
+		return "space stage • enter apply+back • backspace/P back • / filter • u ultra • q save • esc quit • ? help"
 	default:
-		return "comp | enter drill • space stage • backspace up • / filter • u ultra • q save • esc quit"
+		return "enter drill • space stage • backspace up • / filter • u ultra • q save • esc quit • ? help"
 	}
+}
+
+func (m tuiModel) renderHelpPanel() string {
+	lines := []string{
+		"Keys",
+		"Enter/right: drill or apply",
+		"Space: stage selection",
+		"Ctrl+S or q: save and quit",
+		"Esc or Ctrl+C: quit without saving",
+		"/: filter current list",
+		"Backspace/delete: go up/back (when not filtering)",
+		"u: toggle ultra compact mode",
+		"?: toggle this help panel",
+		"",
+		"Mode Navigation",
+		"contexts: r regions • c compartments • t tenancies",
+		"submenus: R regions • C compartments • T tenancies • P profiles",
+	}
+	if m.width > 0 && m.width < 72 {
+		lines = []string{
+			"Keys: enter drill, space stage, q save, esc quit, / filter, ? help",
+			"Switch: r/c/t in contexts, R/C/T/P in submenus",
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func compactMetaNarrow(m tuiModel) string {
