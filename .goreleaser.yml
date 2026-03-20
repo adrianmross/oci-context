@@ -24,7 +24,7 @@ builds:
       - goos: windows
         goarch: arm64
     ldflags:
-      - -s -w
+      - -s -w -X github.com/adrianmross/oci-context/internal/cmd.version={{.Version}} -X github.com/adrianmross/oci-context/internal/cmd.commit={{.ShortCommit}} -X github.com/adrianmross/oci-context/internal/cmd.date={{.Date}}
 
   - id: oci-contextd
     main: ./cmd/oci-contextd
@@ -42,7 +42,7 @@ builds:
       - goos: windows
         goarch: arm64
     ldflags:
-      - -s -w
+      - -s -w -X github.com/adrianmross/oci-context/internal/cmd.version={{.Version}} -X github.com/adrianmross/oci-context/internal/cmd.commit={{.ShortCommit}} -X github.com/adrianmross/oci-context/internal/cmd.date={{.Date}}
 
 archives:
   - id: default
