@@ -1496,6 +1496,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "v":
+			if m.layoutOverride == "matrix" || m.shouldUseGridLayout() {
+				m.setModeVerbose(m.mode, true)
+				m.layoutOverride = "list"
+				m.refreshDelegates()
+				m.resizeListsForViewport()
+				m.status = fmt.Sprintf("Verbose ON for %s (list)", m.mode)
+				return m, nil
+			}
 			next := !m.isModeVerbose(m.mode)
 			m.setModeVerbose(m.mode, next)
 			m.refreshDelegates()
@@ -1503,12 +1511,19 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Verbose %s for %s (session)", onOff(next), m.mode)
 			return m, nil
 		case "m":
-			if m.effectiveGridLayout() {
+			if m.layoutOverride == "matrix" || m.shouldUseGridLayout() {
 				m.layoutOverride = "list"
+				m.status = "Layout list (session)"
 			} else {
 				m.layoutOverride = "matrix"
+				m.setModeVerbose(m.mode, false)
+				m.refreshDelegates()
+				m.resizeListsForViewport()
+				m.status = "Layout matrix + verbose OFF (session)"
+				return m, nil
 			}
-			m.status = fmt.Sprintf("Layout %s (session)", m.layoutOverride)
+			m.refreshDelegates()
+			m.resizeListsForViewport()
 			return m, nil
 		}
 	}
