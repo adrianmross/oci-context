@@ -1972,6 +1972,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) View() string {
 	m.refreshDelegates()
+	m.resizeListsForViewport()
 	if m.err != nil {
 		return m.theme.panel.Render(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true).Render(fmt.Sprintf("error: %v", m.err)))
 	}
