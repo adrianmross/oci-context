@@ -1015,61 +1015,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// If currently filtering, route all keys except Enter through the active list to avoid triggering hotkeys.
-		if m.mode == "contexts" && m.list.FilterState() == list.Filtering && msg.String() != "enter" {
-			m.list, cmd = m.list.Update(msg)
-			return m, cmd
-		}
-		if m.mode == "tenancies" && m.tenancies.FilterState() == list.Filtering && msg.String() != "enter" {
-			m.tenancies, cmd = m.tenancies.Update(msg)
-			return m, cmd
-		}
-		if m.mode == "compartments" && m.comps.FilterState() == list.Filtering && msg.String() != "enter" {
-			m.comps, cmd = m.comps.Update(msg)
-			return m, cmd
-		}
-		if m.mode == "regions" && m.regions.FilterState() == list.Filtering && msg.String() != "enter" {
-			m.regions, cmd = m.regions.Update(msg)
-			return m, cmd
+		// While actively typing a filter, defer all keys to the list component.
+		if m.activeListFilterState() == list.Filtering {
+			return m.updateActiveList(msg)
 		}
 
 		switch msg.String() {
 		case "enter", "right":
-			// If currently filtering, apply the filtered subset and exit filter mode before acting.
-			if m.mode == "contexts" && m.list.FilterState() == list.Filtering {
-				vis := m.list.VisibleItems()
-				m.list.SetItems(vis)
-				m.list.SetFilteringEnabled(false)
-				if len(vis) > 0 {
-					m.list.Select(0)
-				}
-				return m, nil
-			}
-			if m.mode == "tenancies" && m.tenancies.FilterState() == list.Filtering {
-				vis := m.tenancies.VisibleItems()
-				m.tenancies.SetItems(vis)
-				m.tenancies.SetFilteringEnabled(false)
-				if len(vis) > 0 {
-					m.tenancies.Select(0)
-				}
-				return m, nil
-			}
-			if m.mode == "compartments" && m.comps.FilterState() == list.Filtering {
-				vis := m.comps.VisibleItems()
-				m.comps.SetItems(vis)
-				m.comps.SetFilteringEnabled(false)
-				if len(vis) > 0 {
-					m.comps.Select(0)
-				}
-				return m, nil
-			}
-			if m.mode == "regions" && m.regions.FilterState() == list.Filtering {
-				vis := m.regions.VisibleItems()
-				m.regions.SetItems(vis)
-				m.regions.SetFilteringEnabled(false)
-				if len(vis) > 0 {
-					m.regions.Select(0)
-				}
+			if m.activeListFilterState() == list.FilterApplied {
+				// Don't drill on enter while a filter is applied; use '/' to edit filter or Esc to clear.
 				return m, nil
 			}
 			if m.mode == "contexts" {
@@ -1242,7 +1196,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.saveAndQuitCurrentMode()
 		case "q":
 			return m.saveAndQuitCurrentMode()
-		case "esc", "ctrl+c":
+		case "esc":
+			if m.activeListFilterState() == list.FilterApplied {
+				m.clearActiveAppliedFilter()
+				m.status = "Filter cleared"
+				return m, nil
+			}
+			return m, tea.Quit
+		case "ctrl+c":
 			// Exit without saving on explicit quit keys.
 			return m, tea.Quit
 		case "b":
@@ -1560,6 +1521,34 @@ func (m tuiModel) activeListModel() list.Model {
 	default:
 		return m.comps
 	}
+}
+
+func (m tuiModel) activeListFilterState() list.FilterState {
+	switch m.mode {
+	case "contexts":
+		return m.list.FilterState()
+	case "tenancies":
+		return m.tenancies.FilterState()
+	case "regions":
+		return m.regions.FilterState()
+	default:
+		return m.comps.FilterState()
+	}
+}
+
+func (m *tuiModel) clearActiveAppliedFilter() {
+	l := m.activeListModel()
+	l.SetFilterText("")
+	l.SetFilterState(list.Unfiltered)
+	m.setActiveListModel(l)
+}
+
+func (m tuiModel) updateActiveList(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	l := m.activeListModel()
+	l, cmd = l.Update(msg)
+	m.setActiveListModel(l)
+	return m, cmd
 }
 
 func (m *tuiModel) setActiveListModel(l list.Model) {

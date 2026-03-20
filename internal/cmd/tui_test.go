@@ -106,13 +106,14 @@ func TestTUIEnterAppliesFilterAndExits(t *testing.T) {
 	}
 	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
 	m.list.SetFilteringEnabled(true)
+	m.list.SetFilterText("dev")
 	m.list.SetFilterState(list.Filtering)
 
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	res := model.(tuiModel)
 
-	if res.list.FilterState() == list.Filtering {
-		t.Fatalf("expected filtering to end after enter")
+	if res.list.FilterState() != list.FilterApplied {
+		t.Fatalf("expected filter to be applied after enter, got state=%v", res.list.FilterState())
 	}
 	if res.list.Index() != 0 {
 		t.Fatalf("expected selection index 0 after enter, got %d", res.list.Index())
@@ -254,6 +255,28 @@ func TestTUIEscDoesNotSaveAfterStaging(t *testing.T) {
 	res = model.(tuiModel)
 	if res.finalized {
 		t.Fatalf("expected esc to quit without save after staging")
+	}
+}
+
+func TestTUIEscClearsAppliedFilterBeforeQuit(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{
+		Options:  config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{ci.Context},
+	}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "contexts"
+	m.list.SetFilteringEnabled(true)
+	m.list.SetFilterText("dev")
+	m.list.SetFilterState(list.FilterApplied)
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	res := model.(tuiModel)
+	if res.list.FilterState() != list.Unfiltered {
+		t.Fatalf("expected first esc to clear applied filter, got state=%v", res.list.FilterState())
+	}
+	if res.finalized {
+		t.Fatalf("expected not finalized when clearing filter")
 	}
 }
 
