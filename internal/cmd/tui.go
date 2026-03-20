@@ -778,6 +778,7 @@ type tuiModel struct {
 	theme              tuiTheme
 	prefs              tuiPrefs
 	prefsPath          string
+	forceMatrix        bool
 	width              int
 	height             int
 	panelInnerHeight   int
@@ -1391,6 +1392,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resizeListsForViewport()
 			m.status = fmt.Sprintf("Verbose %s for %s (session)", onOff(next), m.mode)
 			return m, nil
+		case "m":
+			m.forceMatrix = !m.forceMatrix
+			if m.forceMatrix {
+				m.status = "Layout matrix (session)"
+			} else {
+				m.status = "Layout list (session)"
+			}
+			return m, nil
 		}
 	}
 	// handle async comp results
@@ -1623,6 +1632,9 @@ func (m tuiModel) shouldUseGridLayout() bool {
 	}
 	if len(m.activeListModel().Items()) == 0 {
 		return false
+	}
+	if m.forceMatrix {
+		return true
 	}
 	if m.isModeVerbose(m.mode) {
 		return false
@@ -1860,9 +1872,9 @@ func (m tuiModel) shouldInlineHotkeys() bool {
 
 func primaryHotkeys(compact bool) string {
 	if compact {
-		return "enter/backspace drill/up • space stage • / filter • v verbose • q save • ? help"
+		return "enter/backspace drill/up • space stage • / filter • v verbose • m matrix • q save • ? help"
 	}
-	return "enter/backspace drill/up • space stage • / filter • v verbose • q save • ? help"
+	return "enter/backspace drill/up • space stage • / filter • v verbose • m matrix • q save • ? help"
 }
 
 func inlineStateSummary(m tuiModel) string {
@@ -1873,7 +1885,15 @@ func inlineStateSummary(m tuiModel) string {
 	if current == "" {
 		current = "-"
 	}
-	return fmt.Sprintf("mode:%s | current:%s", m.mode, current)
+	layout := "list"
+	if m.shouldUseGridLayout() {
+		layout = "matrix"
+	}
+	detail := "compact"
+	if m.isModeVerbose(m.mode) {
+		detail = "verbose"
+	}
+	return fmt.Sprintf("mode:%s | current:%s | layout:%s | detail:%s", m.mode, current, layout, detail)
 }
 
 func (m tuiModel) renderHelpPanel() string {
@@ -1885,6 +1905,7 @@ func (m tuiModel) renderHelpPanel() string {
 		"Esc or Ctrl+C: quit without saving",
 		"/: filter current list",
 		"v: toggle verbose view for current mode",
+		"m: toggle matrix layout for current session",
 		"Backspace/delete: go up/back (when not filtering)",
 		"?: toggle this help panel",
 		"",
