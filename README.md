@@ -239,6 +239,12 @@ launchctl load ~/Library/LaunchAgents/com.adrianmross.oci-context.daemon.plist
 launchctl start com.adrianmross.oci-context.daemon
 ```
 
+After reinstalling/upgrading `oci-context`, restart the running launchd job so the daemon picks up the new binary. Otherwise, IPC commands can hit stale behavior (for example, `daemon nudge` returning `method not implemented` while help/docs show it):
+
+```sh
+launchctl kickstart -k gui/$(id -u)/com.adrianmross.oci-context.daemon
+```
+
 ### sleep/wake automation with sleepwatcher
 Install wake hook automation (restarts daemon + nudges auth checks on wake):
 
