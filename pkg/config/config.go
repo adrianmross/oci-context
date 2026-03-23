@@ -20,9 +20,10 @@ type Config struct {
 
 // Options holds global settings.
 type Options struct {
-	OCIConfigPath  string `yaml:"oci_config_path"`
-	SocketPath     string `yaml:"socket_path"`
-	DefaultProfile string `yaml:"default_profile"`
+	OCIConfigPath  string   `yaml:"oci_config_path"`
+	SocketPath     string   `yaml:"socket_path"`
+	DefaultProfile string   `yaml:"default_profile"`
+	DaemonContexts []string `yaml:"daemon_contexts,omitempty"`
 }
 
 // Context describes a selectable OCI context.
@@ -87,6 +88,7 @@ func DefaultConfig(home string) Config {
 			OCIConfigPath:  filepath.Join(home, ".oci", "config"),
 			SocketPath:     filepath.Join(home, ".oci-context", "daemon.sock"),
 			DefaultProfile: "",
+			DaemonContexts: []string{},
 		},
 		Contexts:       []Context{},
 		CurrentContext: "",

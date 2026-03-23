@@ -1,9 +1,9 @@
 # oci-context
 
-A daemon + CLI/TUI to manage OCI context (profile, tenancy, compartment, region) akin to kubectl contexts. Designed to work with other tools (e.g., bastion-session, oci-secrets-courier/foundry) by exposing the current context over a local socket or via `oci-context export`.
+A daemon + CLI/TUI to manage OCI context (profile, tenancy, compartment, region) akin to kubectl contexts. Designed to work with other tools by exposing context over a local socket or via `oci-context export`.
 
 ## Components
-- **Daemon (oci-contextd)**: maintains current context, serves a Unix socket with JSON RPC-like API for get/set/list/status/watch.
+- **Daemon (oci-contextd / `oci-context daemon serve`)**: serves Unix socket APIs and can run background auth validation/refresh loops.
 - **CLI/TUI (oci-context)**: manage contexts, switch current context, export env/JSON, control daemon, and pick via TUI selector.
 
 ## Install
@@ -60,6 +60,7 @@ options:
   oci_config_path: ~/.oci/config
   socket_path: ~/.oci-context/daemon.sock
   default_profile: ""
+  daemon_contexts: []
 contexts:
   - name: dev
     profile: DEFAULT
@@ -77,11 +78,19 @@ current_context: dev
 ```
 
 ## IPC API (Unix socket, framed JSON)
-Requests: `{ "method": "get_current" }`, `{ "method": "use_context", "name": "dev" }`, `{ "method": "list" }`, `{ "method": "add_context", "context": { ... } }`, `{ "method": "delete_context", "name": "dev" }`, `{ "method": "status" }`, `{ "method": "export", "format": "env|json" }`, `{ "method": "watch" }`.
-Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`. Watch streams events.
+Requests include:
+- `{ "method": "get_current" }`
+- `{ "method": "use_context", "name": "dev" }`
+- `{ "method": "list" }`
+- `{ "method": "add_context", "context": { ... } }`
+- `{ "method": "delete_context", "name": "dev" }`
+- `{ "method": "export", "format": "env|json" }`
+- `{ "method": "auth_status", "name": "dev" }` (name optional; defaults to current)
+
+Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 
 ## CLI commands
-- `oci-context --version` or `oci-context -v` (prints build version metadata)
+- `oci-context --version` or `oci-context -v`
 - `oci-context init`
 - `oci-context list`
 - `oci-context current`
@@ -92,7 +101,13 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`. W
 - `oci-context delete <name>`
 - `oci-context status`
 - `oci-context export --format env|json`
-- `oci-context daemon start|stop|status`
+- `oci-context auth methods|show|set|set-user|login|refresh|validate|setup`
+- `oci-context daemon serve [--auto-refresh --validate-interval 5m --refresh-interval 15m]`
+- `oci-context daemon auth-status [--context <name>]`
+- `oci-context daemon nudge [--context <name>]`
+- `oci-context daemon monitor list|add|remove|clear`
+- `oci-context daemon launchd generate` (macOS)
+- `oci-context daemon sleepwatcher install` (macOS wake hook automation)
 - `oci-context tui`
 
 ### OCI CLI Defaults (Transparent `oci` Usage)
@@ -165,6 +180,97 @@ Errors:
 - Shell: `eval $(oci-context export --format env)` sets OCI_CLI_PROFILE, OCI_TENANCY_OCID, OCI_COMPARTMENT_OCID, OCI_REGION.
 - Tools: read JSON via `oci-context export --format json` or query the socket.
 
+## Daemon Auth Monitoring
+The daemon can monitor and maintain auth for one or more contexts in the background.
+
+- If `options.daemon_contexts` is empty, daemon monitors `current_context`.
+- If `options.daemon_contexts` has entries, daemon monitors all listed contexts.
+- `security_token` contexts: daemon validates and refreshes based on intervals.
+- Other auth methods: daemon validates only.
+- Failure handling uses exponential backoff and stderr rate-limiting to reduce noise.
+
+Manage monitored contexts:
+
+```sh
+oci-context daemon monitor add dev prod
+oci-context daemon monitor list
+oci-context daemon monitor remove dev
+oci-context daemon monitor clear
+```
+
+Trigger immediate maintenance without waiting for interval:
+
+```sh
+oci-context daemon nudge
+oci-context daemon nudge --context dev
+```
+
+Run daemon with auth maintenance enabled:
+
+```sh
+oci-context daemon serve --auto-refresh --validate-interval 5m --refresh-interval 15m
+```
+
+Check runtime status:
+
+```sh
+oci-context daemon auth-status --context dev
+oci-context auth show --context dev
+```
+
+## Background Service
+### macOS (`launchd`)
+Generate a plist:
+
+```sh
+oci-context daemon launchd generate \
+  --binary /path/to/oci-context \
+  --config ~/.oci-context/config.yml \
+  --auto-refresh \
+  --validate-interval 5m \
+  --refresh-interval 15m
+```
+
+Then load/start:
+
+```sh
+launchctl unload ~/Library/LaunchAgents/com.adrianmross.oci-context.daemon.plist 2>/dev/null || true
+launchctl load ~/Library/LaunchAgents/com.adrianmross.oci-context.daemon.plist
+launchctl start com.adrianmross.oci-context.daemon
+```
+
+### sleep/wake automation with sleepwatcher
+Install wake hook automation (restarts daemon + nudges auth checks on wake):
+
+```sh
+brew install sleepwatcher
+oci-context daemon sleepwatcher install
+```
+
+### Linux (`systemd`, user service)
+Example unit file (`~/.config/systemd/user/oci-context-daemon.service`):
+
+```ini
+[Unit]
+Description=oci-context daemon
+After=network-online.target
+
+[Service]
+ExecStart=/path/to/oci-context daemon serve --config %h/.oci-context/config.yml --auto-refresh --validate-interval 5m --refresh-interval 15m
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Enable and start:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now oci-context-daemon
+systemctl --user status oci-context-daemon
+```
 ## Status
 Work in progress.
 
