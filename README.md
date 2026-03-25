@@ -108,6 +108,8 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 - `oci-context daemon monitor list|add|remove|clear`
 - `oci-context daemon launchd generate` (macOS)
 - `oci-context daemon sleepwatcher install` (macOS wake hook automation)
+- `oci-context daemon hammerspoon install` (macOS actionable wake notifications)
+- `oci-context daemon hammerspoon notify` (macOS manual trigger)
 - `oci-context tui`
 
 ### OCI CLI Defaults (Transparent `oci` Usage)
@@ -252,6 +254,34 @@ Install wake hook automation (restarts daemon + nudges auth checks on wake):
 brew install sleepwatcher
 oci-context daemon sleepwatcher install
 ```
+
+### Actionable wake notifications with Hammerspoon (macOS)
+Install managed Hammerspoon integration plus a wake hook script that sends clickable notifications. Clicking `Re-auth now` runs `oci session authenticate` for the affected profile.
+
+```sh
+brew install --cask hammerspoon
+oci-context daemon hammerspoon install
+```
+
+Notes:
+- This command writes/updates:
+  - `~/.hammerspoon/oci_context.lua` (managed URL handler + auth task runner)
+  - `~/.hammerspoon/init.lua` (adds `pcall(require, "oci_context")` when missing)
+  - `~/.wakeup` (wake script that nudges daemon and raises actionable notifications on auth failures)
+- If you prefer manual reload, run with `--reload=false` and then:
+
+```sh
+open -g 'hammerspoon://reloadConfig'
+```
+
+Manually trigger an actionable notification from CLI:
+
+```sh
+oci-context daemon hammerspoon notify --context dev --reason "manual check"
+oci-context daemon hammerspoon notify --context dev --reason "manual check" --tenancy-name your-tenancy
+```
+
+`--tenancy-name` is optional. When omitted, `notify` uses the selected context's `tenancy_ocid`.
 
 ### Linux (`systemd`, user service)
 Example unit file (`~/.config/systemd/user/oci-context-daemon.service`):

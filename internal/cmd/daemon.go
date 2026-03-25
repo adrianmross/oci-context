@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,7 @@ func newDaemonCmd() *cobra.Command {
 	cmd.AddCommand(newDaemonMonitorCmd())
 	cmd.AddCommand(newDaemonLaunchdCmd())
 	cmd.AddCommand(newDaemonSleepwatcherCmd())
+	cmd.AddCommand(newDaemonHammerspoonCmd())
 	return cmd
 }
 
@@ -280,6 +282,174 @@ func newDaemonSleepwatcherCmd() *cobra.Command {
 		Short: "Install wake automation that nudges daemon auth checks",
 	}
 	cmd.AddCommand(newDaemonSleepwatcherInstallCmd())
+	return cmd
+}
+
+func newDaemonHammerspoonCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "hammerspoon",
+		Short: "Install Hammerspoon auth notifications and wake automation",
+	}
+	cmd.AddCommand(newDaemonHammerspoonInstallCmd())
+	cmd.AddCommand(newDaemonHammerspoonNotifyCmd())
+	return cmd
+}
+
+func newDaemonHammerspoonInstallCmd() *cobra.Command {
+	var (
+		cfgPath        string
+		daemonLabel    string
+		wakeupScript   string
+		hammerspoonDir string
+		ociContextBin  string
+		reloadNow      bool
+	)
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install managed Hammerspoon handler and wake script",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runtime.GOOS != "darwin" {
+				return fmt.Errorf("hammerspoon install is only supported on macOS")
+			}
+			path, err := daemon.EnsureConfig(cfgPath)
+			if err != nil {
+				return err
+			}
+			_ = path
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			if ociContextBin == "" {
+				if p, lookErr := exec.LookPath("oci-context"); lookErr == nil {
+					ociContextBin = p
+				}
+			}
+			if ociContextBin == "" {
+				exe, exeErr := os.Executable()
+				if exeErr == nil {
+					ociContextBin = exe
+				}
+			}
+			if ociContextBin == "" {
+				return fmt.Errorf("could not resolve oci-context binary path; pass --oci-context-bin")
+			}
+			if wakeupScript == "" {
+				wakeupScript = filepath.Join(home, ".wakeup")
+			}
+			if hammerspoonDir == "" {
+				hammerspoonDir = filepath.Join(home, ".hammerspoon")
+			}
+
+			if err := os.MkdirAll(hammerspoonDir, 0o755); err != nil {
+				return err
+			}
+			modulePath := filepath.Join(hammerspoonDir, "oci_context.lua")
+			initPath := filepath.Join(hammerspoonDir, "init.lua")
+
+			if err := os.WriteFile(modulePath, []byte(renderHammerspoonModule()), 0o644); err != nil {
+				return err
+			}
+			if err := ensureHammerspoonInitLoadsModule(initPath); err != nil {
+				return err
+			}
+			if err := os.WriteFile(wakeupScript, []byte(renderWakeupScriptWithHammerspoon(ociContextBin, daemonLabel)), 0o755); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote Hammerspoon module: %s\n", modulePath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Updated Hammerspoon init: %s\n", initPath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote wake script: %s\n", wakeupScript)
+
+			if reloadNow {
+				if out, err := exec.Command("open", "-a", "Hammerspoon").CombinedOutput(); err != nil {
+					return fmt.Errorf("failed to launch Hammerspoon: %v: %s", err, strings.TrimSpace(string(out)))
+				}
+				if out, err := exec.Command("open", "-g", "hammerspoon://reloadConfig").CombinedOutput(); err != nil {
+					return fmt.Errorf("failed to reload Hammerspoon config: %v: %s", err, strings.TrimSpace(string(out)))
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "Hammerspoon launched and config reloaded.")
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "Reload Hammerspoon config with: open -g 'hammerspoon://reloadConfig'")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&daemonLabel, "daemon-label", "com.adrianmross.oci-context.daemon", "launchd label for oci-context daemon")
+	cmd.Flags().StringVar(&wakeupScript, "wakeup-script", "", "Path to write wake hook script (default ~/.wakeup)")
+	cmd.Flags().StringVar(&hammerspoonDir, "hammerspoon-dir", "", "Path to Hammerspoon config directory (default ~/.hammerspoon)")
+	cmd.Flags().StringVar(&ociContextBin, "oci-context-bin", "", "Absolute path to oci-context binary")
+	cmd.Flags().BoolVar(&reloadNow, "reload", true, "Launch Hammerspoon and reload config after writing files")
+	return cmd
+}
+
+func newDaemonHammerspoonNotifyCmd() *cobra.Command {
+	var (
+		cfgPath      string
+		contextName  string
+		reason       string
+		profile      string
+		region       string
+		tenancyName  string
+		printOnlyURL bool
+	)
+	cmd := &cobra.Command{
+		Use:   "notify",
+		Short: "Trigger Hammerspoon actionable auth notification",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runtime.GOOS != "darwin" {
+				return fmt.Errorf("hammerspoon notify is only supported on macOS")
+			}
+			ctxName := strings.TrimSpace(contextName)
+			prof := strings.TrimSpace(profile)
+			reg := strings.TrimSpace(region)
+			if ctxName == "" || prof == "" || reg == "" {
+				cfg, _, err := loadDaemonConfig(cfgPath)
+				if err != nil {
+					return err
+				}
+				if ctxName == "" {
+					ctxName = cfg.CurrentContext
+				}
+				if ctxName != "" {
+					ctx, err := cfg.GetContext(ctxName)
+					if err != nil {
+						return err
+					}
+					if prof == "" {
+						prof = ctx.Profile
+					}
+					if reg == "" {
+						reg = ctx.Region
+					}
+				}
+			}
+			if ctxName == "" {
+				ctxName = "current"
+			}
+			if prof == "" {
+				prof = "DEFAULT"
+			}
+			eventURL := buildHammerspoonAuthNeededURL(prof, ctxName, reg, reason, tenancyName)
+			if printOnlyURL {
+				fmt.Fprintln(cmd.OutOrStdout(), eventURL)
+				return nil
+			}
+			if out, err := exec.Command("open", "-g", eventURL).CombinedOutput(); err != nil {
+				return fmt.Errorf("failed to trigger hammerspoon event: %v: %s", err, strings.TrimSpace(string(out)))
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Triggered Hammerspoon notification for context=%s profile=%s region=%s\n", ctxName, prof, reg)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&contextName, "context", "", "Context name (default current)")
+	cmd.Flags().StringVar(&reason, "reason", "manual", "Reason text shown in notification")
+	cmd.Flags().StringVar(&profile, "profile", "", "Override profile passed to Hammerspoon event")
+	cmd.Flags().StringVar(&region, "region", "", "Override region passed to Hammerspoon event")
+	cmd.Flags().StringVar(&tenancyName, "tenancy-name", "", "Optional tenancy name passed to session authenticate")
+	cmd.Flags().BoolVar(&printOnlyURL, "print-url", false, "Print event URL instead of opening it")
 	return cmd
 }
 
@@ -552,6 +722,271 @@ set -euo pipefail
 launchctl kickstart -k gui/$(id -u)/%s >/dev/null 2>&1 || true
 %s daemon nudge >/dev/null 2>&1 || true
 `, daemonLabel, shellQuote(ociContextBin))
+}
+
+func renderWakeupScriptWithHammerspoon(ociContextBin, daemonLabel string) string {
+	return fmt.Sprintf(`#!/bin/zsh
+set -euo pipefail
+
+OCI_CONTEXT_BIN=%s
+DAEMON_LABEL=%s
+
+notify() {
+  local msg="$1"
+  local subtitle="$2"
+  /usr/bin/osascript -e "display notification \"${msg}\" with title \"oci-context\" subtitle \"${subtitle}\"" >/dev/null 2>&1 || true
+}
+
+notify_actionable() {
+  local profile="$1"
+  local context_name="$2"
+  local reason="$3"
+  local region="$4"
+
+  if [ -n "${profile}" ] && [ -n "${context_name}" ]; then
+    local url
+    url="hammerspoon://oci-auth-needed?profile=${profile}&context=${context_name}&region=${region}&reason=wake_auth_check_failed"
+    /usr/bin/open -g "${url}" >/dev/null 2>&1 && return 0
+  fi
+
+  local hint="Run: oci session authenticate"
+  if [ -n "${profile}" ]; then
+    hint="Run: oci session authenticate --profile ${profile}"
+  fi
+  local msg="Auth unhealthy for ${context_name:-current}. ${hint}"
+  if [ -n "${reason}" ]; then
+    msg="${msg}. ${reason}"
+  fi
+  notify "${msg}" "Wake auth check"
+}
+
+extract_string() {
+  local key="$1"
+  printf '%%s' "$status_json" | tr -d '\n' | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p"
+}
+
+extract_bool() {
+  local key="$1"
+  printf '%%s' "$status_json" | tr -d '\n' | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\\(true\\|false\\).*/\\1/p"
+}
+
+extract_context_region() {
+  local target_context="$1"
+  if [ -z "${target_context}" ]; then
+    return 0
+  fi
+  "${OCI_CONTEXT_BIN}" list -v 2>/dev/null | awk -v target="${target_context}" '
+    {
+      line=$0
+      sub(/^[* ]+/, "", line)
+      name=line
+      sub(/ .*/, "", name)
+      if (name == target) {
+        if (match(line, /region=[^ )]+/)) {
+          print substr(line, RSTART+7, RLENGTH-7)
+          exit
+        }
+      }
+    }
+  '
+}
+
+launchctl kickstart -k "gui/$(id -u)/${DAEMON_LABEL}" >/dev/null 2>&1 || true
+"${OCI_CONTEXT_BIN}" daemon nudge >/dev/null 2>&1 || true
+
+sleep 2
+status_json="$("${OCI_CONTEXT_BIN}" daemon auth-status 2>/dev/null || true)"
+
+if [ -z "${status_json}" ]; then
+  notify_actionable "${profile:-}" "${context_name:-current}" "Daemon status unavailable after wake" ""
+  exit 0
+fi
+
+context_name="$(extract_string context_name)"
+auth_method="$(extract_string auth_method)"
+last_validate_ok="$(extract_bool last_validate_ok)"
+last_refresh_ok="$(extract_bool last_refresh_ok)"
+last_error="$(extract_string last_error)"
+
+profile=""
+if [ -n "${context_name}" ]; then
+  profile="$("${OCI_CONTEXT_BIN}" auth show --context "${context_name}" 2>/dev/null | sed -n 's/^profile: //p' | head -n1)"
+fi
+region="$(extract_context_region "${context_name}" | head -n1)"
+
+if [ "${auth_method}" = "security_token" ]; then
+  if [ "${last_validate_ok}" != "true" ] || [ "${last_refresh_ok}" != "true" ]; then
+    notify_actionable "${profile}" "${context_name}" "${last_error}" "${region}"
+  fi
+else
+  if [ "${last_validate_ok}" != "true" ]; then
+    notify_actionable "${profile}" "${context_name}" "${last_error}" "${region}"
+  fi
+fi
+`, shellQuote(ociContextBin), shellQuote(daemonLabel))
+}
+
+func renderHammerspoonModule() string {
+	return `local function findOciBin()
+  local candidates = {
+    "/usr/local/bin/oci",
+    "/opt/homebrew/bin/oci",
+    "/usr/bin/oci",
+  }
+  for _, p in ipairs(candidates) do
+    if hs.fs.attributes(p, "mode") then
+      return p
+    end
+  end
+  return "oci"
+end
+
+local function findOciContextBin()
+  local candidates = {
+    "/usr/local/bin/oci-context",
+    "/opt/homebrew/bin/oci-context",
+    "/usr/bin/oci-context",
+  }
+  for _, p in ipairs(candidates) do
+    if hs.fs.attributes(p, "mode") then
+      return p
+    end
+  end
+  return "oci-context"
+end
+
+local function shellQuote(s)
+  return "'" .. tostring(s):gsub("'", "'\"'\"'") .. "'"
+end
+
+local function runOciAuthenticate(profile, region, contextName, tenancyName)
+  local oci = findOciBin()
+  local p = (profile and profile ~= "") and profile or "DEFAULT"
+  local cmd = string.format("%s session authenticate --profile-name %s", shellQuote(oci), shellQuote(p))
+  if region and region ~= "" then
+    cmd = cmd .. " --region " .. shellQuote(region)
+  end
+  if tenancyName and tenancyName ~= "" then
+    cmd = cmd .. " --tenancy-name " .. shellQuote(tenancyName)
+  end
+
+  hs.notify.new({
+    title = "oci-context",
+    informativeText = string.format("Starting auth for profile %s", p),
+    autoWithdraw = true,
+  }):send()
+
+  hs.task.new("/bin/zsh", function(exitCode, stdOut, stdErr)
+    local text = ""
+    if exitCode == 0 then
+      text = "Authentication command completed for profile " .. p
+    else
+      text = "Authentication failed for profile " .. p .. ". Check ~/.hammerspoon/oci-auth.log"
+    end
+    hs.notify.new({
+      title = "oci-context",
+      informativeText = text,
+      autoWithdraw = true,
+    }):send()
+
+    local logPath = os.getenv("HOME") .. "/.hammerspoon/oci-auth.log"
+    local f = io.open(logPath, "a")
+    if f then
+      f:write("\n--- " .. os.date("!%Y-%m-%dT%H:%M:%SZ") .. " ---\n")
+      f:write("cmd: " .. cmd .. "\n")
+      f:write("exit: " .. tostring(exitCode) .. "\n")
+      if stdOut and stdOut ~= "" then
+        f:write("stdout:\n" .. stdOut .. "\n")
+      end
+      if stdErr and stdErr ~= "" then
+        f:write("stderr:\n" .. stdErr .. "\n")
+      end
+      f:close()
+    end
+    return true
+  end, { "-lc", cmd }):start()
+end
+
+local function showAuthNeededNotification(profile, contextName, reason, region, tenancyName)
+  local p = (profile and profile ~= "") and profile or "DEFAULT"
+  local ctx = (contextName and contextName ~= "") and contextName or "current"
+  local msg = string.format("Auth unhealthy for %s (%s)", ctx, p)
+  if reason and reason ~= "" then
+    msg = msg .. "\n" .. reason
+  end
+
+  local n = hs.notify.new(function(notification)
+    local activation = notification:activationType()
+    if activation == hs.notify.activationTypes.actionButtonClicked or activation == hs.notify.activationTypes.contentsClicked then
+      runOciAuthenticate(p, region, contextName, tenancyName)
+    end
+  end, {
+    title = "oci-context",
+    informativeText = msg,
+    actionButtonTitle = "Re-auth now",
+    hasActionButton = true,
+    autoWithdraw = true,
+  })
+
+  n:send()
+end
+
+hs.urlevent.bind("oci-auth-needed", function(_, params, _)
+  local profile = params and params.profile or "DEFAULT"
+  local contextName = params and params.context or "current"
+  local reason = params and params.reason or ""
+  local region = params and params.region or ""
+  local tenancyName = params and params.tenancy_name or ""
+  showAuthNeededNotification(profile, contextName, reason, region, tenancyName)
+end)
+`
+}
+
+func ensureHammerspoonInitLoadsModule(initPath string) error {
+	const marker1 = `pcall(require, "oci_context")`
+	const marker2 = `dofile(hs.configdir .. "/oci_context.lua")`
+	const snippet = `
+-- oci-context managed block
+local ok, modErr = pcall(require, "oci_context")
+if not ok then
+  hs.notify.new({
+    title = "oci-context",
+    informativeText = "Hammerspoon load error: " .. tostring(modErr),
+    autoWithdraw = true,
+  }):send()
+end
+-- end oci-context managed block
+`
+	b, err := os.ReadFile(initPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return os.WriteFile(initPath, []byte(strings.TrimLeft(snippet, "\n")), 0o644)
+		}
+		return err
+	}
+	if strings.Contains(string(b), marker1) || strings.Contains(string(b), marker2) {
+		return nil
+	}
+	out := string(b)
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	out += strings.TrimLeft(snippet, "\n")
+	return os.WriteFile(initPath, []byte(out), 0o644)
+}
+
+func buildHammerspoonAuthNeededURL(profile, contextName, region, reason, tenancyName string) string {
+	q := url.Values{}
+	q.Set("profile", profile)
+	q.Set("context", contextName)
+	q.Set("reason", reason)
+	if strings.TrimSpace(region) != "" {
+		q.Set("region", strings.TrimSpace(region))
+	}
+	if strings.TrimSpace(tenancyName) != "" {
+		q.Set("tenancy_name", strings.TrimSpace(tenancyName))
+	}
+	return "hammerspoon://oci-auth-needed?" + q.Encode()
 }
 
 func renderSleepwatcherPlist(label, sleepwatcherBin, wakeupScript string) string {
