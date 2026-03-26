@@ -31,6 +31,9 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 ## Background Service
 - macOS: generate launchd plist with:
   - `oci-context daemon launchd generate ...`
+- macOS: optional actionable wake notifications with Hammerspoon:
+  - `oci-context daemon hammerspoon install`
+  - `oci-context auth notify [--context <name>]`
 - After reinstalling/upgrading the binary, restart the launchd job so the daemon does not keep serving stale code:
   - `launchctl kickstart -k gui/$(id -u)/<launchd-label>`
 - Linux: use a `systemd --user` service.

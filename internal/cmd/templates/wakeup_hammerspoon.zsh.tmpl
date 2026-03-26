@@ -1,0 +1,98 @@
+#!/bin/zsh
+set -euo pipefail
+
+OCI_CONTEXT_BIN={{ .OciContextBinQuoted }}
+DAEMON_LABEL={{ .DaemonLabelQuoted }}
+
+notify() {
+  local msg="$1"
+  local subtitle="$2"
+  /usr/bin/osascript -e "display notification \"${msg}\" with title \"oci-context\" subtitle \"${subtitle}\"" >/dev/null 2>&1 || true
+}
+
+notify_actionable() {
+  local profile="$1"
+  local context_name="$2"
+  local reason="$3"
+  local region="$4"
+
+  if [ -n "${profile}" ] && [ -n "${context_name}" ]; then
+    local url
+    url="hammerspoon://oci-auth-needed?profile=${profile}&context=${context_name}&region=${region}&reason=wake_auth_check_failed"
+    /usr/bin/open -g "${url}" >/dev/null 2>&1 && return 0
+  fi
+
+  local hint="Run: oci session authenticate"
+  if [ -n "${profile}" ]; then
+    hint="Run: oci session authenticate --profile-name ${profile}"
+  fi
+  local msg="Auth unhealthy for ${context_name:-current}. ${hint}"
+  if [ -n "${reason}" ]; then
+    msg="${msg}. ${reason}"
+  fi
+  notify "${msg}" "Wake auth check"
+}
+
+extract_string() {
+  local key="$1"
+  printf '%s' "$status_json" | tr -d '\n' | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p"
+}
+
+extract_bool() {
+  local key="$1"
+  printf '%s' "$status_json" | tr -d '\n' | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\\(true\\|false\\).*/\\1/p"
+}
+
+extract_context_region() {
+  local target_context="$1"
+  if [ -z "${target_context}" ]; then
+    return 0
+  fi
+  "${OCI_CONTEXT_BIN}" list -v 2>/dev/null | awk -v target="${target_context}" '
+    {
+      line=$0
+      sub(/^[* ]+/, "", line)
+      name=line
+      sub(/ .*/, "", name)
+      if (name == target) {
+        if (match(line, /region=[^ )]+/)) {
+          print substr(line, RSTART+7, RLENGTH-7)
+          exit
+        }
+      }
+    }
+  '
+}
+
+launchctl kickstart -k "gui/$(id -u)/${DAEMON_LABEL}" >/dev/null 2>&1 || true
+"${OCI_CONTEXT_BIN}" daemon nudge >/dev/null 2>&1 || true
+
+sleep 0.5
+status_json="$("${OCI_CONTEXT_BIN}" daemon auth-status 2>/dev/null || true)"
+
+if [ -z "${status_json}" ]; then
+  notify_actionable "${profile:-}" "${context_name:-current}" "Daemon status unavailable after wake" ""
+  exit 0
+fi
+
+context_name="$(extract_string context_name)"
+auth_method="$(extract_string auth_method)"
+last_validate_ok="$(extract_bool last_validate_ok)"
+last_refresh_ok="$(extract_bool last_refresh_ok)"
+last_error="$(extract_string last_error)"
+
+profile=""
+if [ -n "${context_name}" ]; then
+  profile="$("${OCI_CONTEXT_BIN}" auth show --context "${context_name}" 2>/dev/null | sed -n 's/^profile: //p' | head -n1)"
+fi
+region="$(extract_context_region "${context_name}" | head -n1)"
+
+if [ "${auth_method}" = "security_token" ]; then
+  if [ "${last_validate_ok}" != "true" ] || [ "${last_refresh_ok}" != "true" ]; then
+    notify_actionable "${profile}" "${context_name}" "${last_error}" "${region}"
+  fi
+else
+  if [ "${last_validate_ok}" != "true" ]; then
+    notify_actionable "${profile}" "${context_name}" "${last_error}" "${region}"
+  fi
+fi

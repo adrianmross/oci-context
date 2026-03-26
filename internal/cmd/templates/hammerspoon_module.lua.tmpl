@@ -1,0 +1,130 @@
+local function findOciBin()
+  local candidates = {
+    "/usr/local/bin/oci",
+    "/opt/homebrew/bin/oci",
+    "/usr/bin/oci",
+  }
+  for _, p in ipairs(candidates) do
+    if hs.fs.attributes(p, "mode") then
+      return p
+    end
+  end
+  return "oci"
+end
+
+local function findOciContextBin()
+  local candidates = {
+    "/usr/local/bin/oci-context",
+    "/opt/homebrew/bin/oci-context",
+    "/usr/bin/oci-context",
+  }
+  for _, p in ipairs(candidates) do
+    if hs.fs.attributes(p, "mode") then
+      return p
+    end
+  end
+  return "oci-context"
+end
+
+local function shellQuote(s)
+  return "'" .. tostring(s):gsub("'", "'\"'\"'") .. "'"
+end
+
+local function joinArgsForLog(bin, args)
+  local parts = { shellQuote(bin) }
+  for _, a in ipairs(args) do
+    table.insert(parts, shellQuote(a))
+  end
+  return table.concat(parts, " ")
+end
+
+local function runOciAuthenticate(profile, region, contextName, tenancyName)
+  local oci = findOciBin()
+  local p = (profile and profile ~= "") and profile or "DEFAULT"
+  local args = {
+    "session",
+    "authenticate",
+    "--profile-name",
+    p,
+  }
+  if region and region ~= "" then
+    table.insert(args, "--region")
+    table.insert(args, region)
+  end
+  if tenancyName and tenancyName ~= "" then
+    table.insert(args, "--tenancy-name")
+    table.insert(args, tenancyName)
+  end
+  local cmd = joinArgsForLog(oci, args)
+
+  hs.notify.new({
+    title = "oci-context",
+    informativeText = string.format("Starting auth for profile %s", p),
+    autoWithdraw = true,
+  }):send()
+
+  hs.task.new(oci, function(exitCode, stdOut, stdErr)
+    local text = ""
+    if exitCode == 0 then
+      text = "Authentication command completed for profile " .. p
+    else
+      text = "Authentication failed for profile " .. p .. ". Check ~/.hammerspoon/oci-auth.log"
+    end
+    hs.notify.new({
+      title = "oci-context",
+      informativeText = text,
+      autoWithdraw = true,
+    }):send()
+
+    local logPath = os.getenv("HOME") .. "/.hammerspoon/oci-auth.log"
+    local f = io.open(logPath, "a")
+    if f then
+      f:write("\n--- " .. os.date("!%Y-%m-%dT%H:%M:%SZ") .. " ---\n")
+      f:write("cmd: " .. cmd .. "\n")
+      f:write("exit: " .. tostring(exitCode) .. "\n")
+      if stdOut and stdOut ~= "" then
+        f:write("stdout:\n" .. stdOut .. "\n")
+      end
+      if stdErr and stdErr ~= "" then
+        f:write("stderr:\n" .. stdErr .. "\n")
+      end
+      f:close()
+    end
+    return true
+  end, args):start()
+end
+
+local function showAuthNeededNotification(profile, contextName, reason, region, tenancyName)
+  local p = (profile and profile ~= "") and profile or "DEFAULT"
+  local ctx = (contextName and contextName ~= "") and contextName or "current"
+  local msg = string.format("Auth unhealthy for %s (%s)", ctx, p)
+  if reason and reason ~= "" then
+    msg = msg .. "\n" .. reason
+  end
+
+  local n = hs.notify.new(function(notification)
+    local activation = notification:activationType()
+    if activation == hs.notify.activationTypes.actionButtonClicked or activation == hs.notify.activationTypes.contentsClicked then
+      hs.timer.doAfter(0, function()
+        runOciAuthenticate(p, region, contextName, tenancyName)
+      end)
+    end
+  end, {
+    title = "oci-context",
+    informativeText = msg,
+    actionButtonTitle = "Re-auth now",
+    hasActionButton = true,
+    autoWithdraw = true,
+  })
+
+  n:send()
+end
+
+hs.urlevent.bind("oci-auth-needed", function(_, params, _)
+  local profile = params and params.profile or "DEFAULT"
+  local contextName = params and params.context or "current"
+  local reason = params and params.reason or ""
+  local region = params and params.region or ""
+  local tenancyName = params and params.tenancy_name or ""
+  showAuthNeededNotification(profile, contextName, reason, region, tenancyName)
+end)

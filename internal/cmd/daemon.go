@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,7 @@ func newDaemonCmd() *cobra.Command {
 	cmd.AddCommand(newDaemonMonitorCmd())
 	cmd.AddCommand(newDaemonLaunchdCmd())
 	cmd.AddCommand(newDaemonSleepwatcherCmd())
+	cmd.AddCommand(newDaemonHammerspoonCmd())
 	return cmd
 }
 
@@ -280,6 +282,189 @@ func newDaemonSleepwatcherCmd() *cobra.Command {
 		Short: "Install wake automation that nudges daemon auth checks",
 	}
 	cmd.AddCommand(newDaemonSleepwatcherInstallCmd())
+	return cmd
+}
+
+func newDaemonHammerspoonCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "hammerspoon",
+		Short: "Install Hammerspoon auth notifications and wake automation",
+	}
+	cmd.AddCommand(newDaemonHammerspoonInstallCmd())
+	return cmd
+}
+
+func newDaemonHammerspoonInstallCmd() *cobra.Command {
+	var (
+		cfgPath        string
+		daemonLabel    string
+		wakeupScript   string
+		hammerspoonDir string
+		ociContextBin  string
+		reloadNow      bool
+	)
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install managed Hammerspoon handler and wake script",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runtime.GOOS != "darwin" {
+				return fmt.Errorf("hammerspoon install is only supported on macOS")
+			}
+			path, err := daemon.EnsureConfig(cfgPath)
+			if err != nil {
+				return err
+			}
+			_ = path
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			if ociContextBin == "" {
+				if p, lookErr := exec.LookPath("oci-context"); lookErr == nil {
+					ociContextBin = p
+				}
+			}
+			if ociContextBin == "" {
+				exe, exeErr := os.Executable()
+				if exeErr == nil {
+					ociContextBin = exe
+				}
+			}
+			if ociContextBin == "" {
+				return fmt.Errorf("could not resolve oci-context binary path; pass --oci-context-bin")
+			}
+			if wakeupScript == "" {
+				wakeupScript = filepath.Join(home, ".wakeup")
+			}
+			if hammerspoonDir == "" {
+				hammerspoonDir = filepath.Join(home, ".hammerspoon")
+			}
+
+			if err := os.MkdirAll(hammerspoonDir, 0o755); err != nil {
+				return err
+			}
+			modulePath := filepath.Join(hammerspoonDir, "oci_context.lua")
+			initPath := filepath.Join(hammerspoonDir, "init.lua")
+
+			if err := os.WriteFile(modulePath, []byte(renderHammerspoonModule()), 0o644); err != nil {
+				return err
+			}
+			if err := ensureHammerspoonInitLoadsModule(initPath); err != nil {
+				return err
+			}
+			if err := os.WriteFile(wakeupScript, []byte(renderWakeupScriptWithHammerspoon(ociContextBin, daemonLabel)), 0o755); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote Hammerspoon module: %s\n", modulePath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Updated Hammerspoon init: %s\n", initPath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote wake script: %s\n", wakeupScript)
+
+			if reloadNow {
+				if out, err := exec.Command("open", "-a", "Hammerspoon").CombinedOutput(); err != nil {
+					return fmt.Errorf("failed to launch Hammerspoon: %v: %s", err, strings.TrimSpace(string(out)))
+				}
+				if out, err := exec.Command("open", "-g", "hammerspoon://reloadConfig").CombinedOutput(); err != nil {
+					return fmt.Errorf("failed to reload Hammerspoon config: %v: %s", err, strings.TrimSpace(string(out)))
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "Hammerspoon launched and config reloaded.")
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "Reload Hammerspoon config with: open -g 'hammerspoon://reloadConfig'")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&daemonLabel, "daemon-label", "com.adrianmross.oci-context.daemon", "launchd label for oci-context daemon")
+	cmd.Flags().StringVar(&wakeupScript, "wakeup-script", "", "Path to write wake hook script (default ~/.wakeup)")
+	cmd.Flags().StringVar(&hammerspoonDir, "hammerspoon-dir", "", "Path to Hammerspoon config directory (default ~/.hammerspoon)")
+	cmd.Flags().StringVar(&ociContextBin, "oci-context-bin", "", "Absolute path to oci-context binary")
+	cmd.Flags().BoolVar(&reloadNow, "reload", true, "Launch Hammerspoon and reload config after writing files")
+	return cmd
+}
+
+func newNotifyCmd(use, short string) *cobra.Command {
+	var (
+		cfgPath      string
+		contextName  string
+		reason       string
+		profile      string
+		region       string
+		tenancyName  string
+		nativeNotify bool
+		printOnlyURL bool
+	)
+	cmd := &cobra.Command{
+		Use:   use,
+		Short: short,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runtime.GOOS != "darwin" {
+				return fmt.Errorf("hammerspoon notify is only supported on macOS")
+			}
+			ctxName := strings.TrimSpace(contextName)
+			prof := strings.TrimSpace(profile)
+			reg := strings.TrimSpace(region)
+			tenancy := strings.TrimSpace(tenancyName)
+			if ctxName == "" || prof == "" || reg == "" || tenancy == "" {
+				cfg, _, err := loadDaemonConfig(cfgPath)
+				if err != nil {
+					return err
+				}
+				if ctxName == "" {
+					ctxName = cfg.CurrentContext
+				}
+				if ctxName != "" {
+					ctx, err := cfg.GetContext(ctxName)
+					if err != nil {
+						return err
+					}
+					if prof == "" {
+						prof = ctx.Profile
+					}
+					if reg == "" {
+						reg = ctx.Region
+					}
+					if tenancy == "" {
+						tenancy = strings.TrimSpace(ctx.TenancyOCID)
+					}
+				}
+			}
+			if ctxName == "" {
+				ctxName = "current"
+			}
+			if prof == "" {
+				prof = "DEFAULT"
+			}
+			eventURL := buildHammerspoonAuthNeededURL(prof, ctxName, reg, reason, tenancy)
+			if printOnlyURL {
+				fmt.Fprintln(cmd.OutOrStdout(), eventURL)
+				return nil
+			}
+			if out, err := exec.Command("open", "-g", eventURL).CombinedOutput(); err != nil {
+				return fmt.Errorf("failed to trigger hammerspoon event: %v: %s", err, strings.TrimSpace(string(out)))
+			}
+			if nativeNotify {
+				msg := fmt.Sprintf("Auth check for %s (%s)", ctxName, prof)
+				if strings.TrimSpace(reason) != "" {
+					msg = fmt.Sprintf("%s\n%s", msg, reason)
+				}
+				if err := sendNativeAuthNotification(eventURL, msg, "oci-context", "Remote trigger"); err != nil {
+					return fmt.Errorf("hammerspoon event sent but native notification failed: %w", err)
+				}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Triggered Hammerspoon notification for context=%s profile=%s region=%s\n", ctxName, prof, reg)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&contextName, "context", "", "Context name (default current)")
+	cmd.Flags().StringVar(&reason, "reason", "manual", "Reason text shown in notification")
+	cmd.Flags().StringVar(&profile, "profile", "", "Override profile passed to Hammerspoon event")
+	cmd.Flags().StringVar(&region, "region", "", "Override region passed to Hammerspoon event")
+	cmd.Flags().StringVar(&tenancyName, "tenancy-name", "", "Optional tenancy override passed to session authenticate (default: selected context tenancy_ocid)")
+	cmd.Flags().StringVar(&tenancyName, "tenancy", "", "Alias for --tenancy-name")
+	cmd.Flags().BoolVar(&nativeNotify, "native-notify", false, "Also send a native macOS notification (terminal-notifier when available, otherwise osascript)")
+	cmd.Flags().BoolVar(&printOnlyURL, "print-url", false, "Print event URL instead of opening it")
 	return cmd
 }
 
@@ -552,6 +737,91 @@ set -euo pipefail
 launchctl kickstart -k gui/$(id -u)/%s >/dev/null 2>&1 || true
 %s daemon nudge >/dev/null 2>&1 || true
 `, daemonLabel, shellQuote(ociContextBin))
+}
+
+func ensureHammerspoonInitLoadsModule(initPath string) error {
+	const marker1 = `pcall(require, "oci_context")`
+	const marker2 = `dofile(hs.configdir .. "/oci_context.lua")`
+	const snippet = `
+-- oci-context managed block
+local ok, modErr = pcall(require, "oci_context")
+if not ok then
+  hs.notify.new({
+    title = "oci-context",
+    informativeText = "Hammerspoon load error: " .. tostring(modErr),
+    autoWithdraw = true,
+  }):send()
+end
+-- end oci-context managed block
+`
+	b, err := os.ReadFile(initPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return os.WriteFile(initPath, []byte(strings.TrimLeft(snippet, "\n")), 0o644)
+		}
+		return err
+	}
+	if strings.Contains(string(b), marker1) || strings.Contains(string(b), marker2) {
+		return nil
+	}
+	out := string(b)
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	out += strings.TrimLeft(snippet, "\n")
+	return os.WriteFile(initPath, []byte(out), 0o644)
+}
+
+func buildHammerspoonAuthNeededURL(profile, contextName, region, reason, tenancyName string) string {
+	q := url.Values{}
+	q.Set("profile", profile)
+	q.Set("context", contextName)
+	q.Set("reason", reason)
+	if strings.TrimSpace(region) != "" {
+		q.Set("region", strings.TrimSpace(region))
+	}
+	if strings.TrimSpace(tenancyName) != "" {
+		q.Set("tenancy_name", strings.TrimSpace(tenancyName))
+	}
+	return "hammerspoon://oci-auth-needed?" + q.Encode()
+}
+
+func buildAppleScriptDisplayNotification(message, title, subtitle string) string {
+	escape := func(s string) string {
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		s = strings.ReplaceAll(s, `"`, `\"`)
+		return s
+	}
+	return fmt.Sprintf(
+		`display notification "%s" with title "%s" subtitle "%s"`,
+		escape(message),
+		escape(title),
+		escape(subtitle),
+	)
+}
+
+func buildTerminalNotifierArgs(eventURL, message, title, subtitle string) []string {
+	return []string{
+		"-title", title,
+		"-subtitle", subtitle,
+		"-message", message,
+		"-open", eventURL,
+	}
+}
+
+func sendNativeAuthNotification(eventURL, message, title, subtitle string) error {
+	if tnPath, err := exec.LookPath("terminal-notifier"); err == nil {
+		args := buildTerminalNotifierArgs(eventURL, message, title, subtitle)
+		if out, err := exec.Command(tnPath, args...).CombinedOutput(); err != nil {
+			return fmt.Errorf("terminal-notifier failed: %v: %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	script := buildAppleScriptDisplayNotification(message, title, subtitle)
+	if out, err := exec.Command("osascript", "-e", script).CombinedOutput(); err != nil {
+		return fmt.Errorf("osascript failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func renderSleepwatcherPlist(label, sleepwatcherBin, wakeupScript string) string {

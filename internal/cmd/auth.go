@@ -184,6 +184,7 @@ func newAuthCmd() *cobra.Command {
 		Use:   "auth",
 		Short: "Manage context auth method and identity workflows",
 	}
+	cmd.AddCommand(newNotifyCmd("notify", "Trigger auth notification (Hammerspoon + native macOS)"))
 
 	resolvePath := func(cmd *cobra.Command) (string, error) {
 		g, err := cmd.Flags().GetBool("global")
@@ -354,7 +355,7 @@ func newAuthCmd() *cobra.Command {
 			method := config.NormalizeAuthMethod(ctx.AuthMethod)
 			switch method {
 			case config.AuthMethodSecurityToken:
-				return runOCI(cmd, []string{"session", "authenticate", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath, "--region", ctx.Region})
+				return runOCI(cmd, []string{"session", "authenticate", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath, "--region", ctx.Region})
 			case config.AuthMethodAPIKey:
 				return runOCI(cmd, []string{"setup", "config", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
 			case config.AuthMethodInstancePrincipal:
