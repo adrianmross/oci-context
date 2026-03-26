@@ -104,6 +104,8 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 - `oci-context auth methods|show|set|set-user|login|refresh|validate|setup|notify`
 - `oci-context daemon serve [--auto-refresh --validate-interval 5m --refresh-interval 15m]`
 - `oci-context daemon install` (macOS one-shot install/reload for launchd)
+- `oci-context daemon recover` (macOS one-command restart + nudge)
+- `oci-context daemon doctor` (diagnose daemon/service/socket/auth health)
 - `oci-context daemon auth-status [--context <name>]`
 - `oci-context daemon nudge [--context <name>]`
 - `oci-context daemon monitor list|add|remove|clear`
@@ -230,6 +232,20 @@ oci-context daemon install --auto-refresh
 ```
 
 This writes the launchd plist, (re)loads it, and kickstarts the job so the running daemon uses the current binary.
+
+Quick recovery when you return to your computer:
+
+```sh
+oci-context daemon recover
+```
+
+This kickstarts the launchd daemon and sends an immediate nudge.
+
+Run diagnostics:
+
+```sh
+oci-context daemon doctor
+```
 
 Generate a plist:
 

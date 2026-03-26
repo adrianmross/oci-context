@@ -24,6 +24,7 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 ## Status and Diagnostics
 - Runtime status:
   - `oci-context daemon auth-status [--context <name>]`
+  - `oci-context daemon doctor [--context <name>]`
   - `oci-context auth show --context <name>`
 - If using `security_token`, ensure the target OCI profile has valid token/session material.
 - If refresh fails persistently, re-authenticate (`oci session authenticate ...`).
@@ -31,6 +32,8 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 ## Background Service
 - macOS: install/reload launchd daemon in one step:
   - `oci-context daemon install`
+- macOS: quick restart + nudge when returning to machine:
+  - `oci-context daemon recover`
 - macOS: generate launchd plist with:
   - `oci-context daemon launchd generate ...`
 - macOS: optional actionable wake notifications with Hammerspoon:

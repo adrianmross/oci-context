@@ -86,3 +86,13 @@ install -d "${bin_dir}"
 install "${tmp_dir}/${tool}" "${bin_dir}/${tool}"
 
 echo "Installed ${tool} to ${bin_dir}/${tool}"
+
+if [[ "${tool}" == "oci-context" ]]; then
+  echo
+  echo "Next steps (macOS daemon):"
+  echo "  oci-context daemon install"
+  echo "  oci-context daemon doctor"
+  echo
+  echo "Quick one-command recovery after wake/resume issues:"
+  echo "  oci-context daemon recover"
+fi

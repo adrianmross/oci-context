@@ -24,6 +24,8 @@ func newDaemonCmd() *cobra.Command {
 		Short: "Manage the oci-context daemon",
 	}
 	cmd.AddCommand(newDaemonInstallCmd())
+	cmd.AddCommand(newDaemonRecoverCmd())
+	cmd.AddCommand(newDaemonDoctorCmd())
 	cmd.AddCommand(newDaemonServeCmd())
 	cmd.AddCommand(newDaemonAuthStatusCmd())
 	cmd.AddCommand(newDaemonNudgeCmd())
@@ -31,6 +33,158 @@ func newDaemonCmd() *cobra.Command {
 	cmd.AddCommand(newDaemonLaunchdCmd())
 	cmd.AddCommand(newDaemonSleepwatcherCmd())
 	cmd.AddCommand(newDaemonHammerspoonCmd())
+	return cmd
+}
+
+func newDaemonRecoverCmd() *cobra.Command {
+	var cfgPath string
+	var label string
+	var contextName string
+	cmd := &cobra.Command{
+		Use:   "recover",
+		Short: "Restart launchd daemon and trigger immediate auth maintenance (macOS)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runtime.GOOS != "darwin" {
+				return fmt.Errorf("daemon recover is only supported on macOS")
+			}
+			target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
+			if out, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
+				return fmt.Errorf("launchctl kickstart failed: %v: %s (run `oci-context daemon install` to reinstall/reload service)", err, strings.TrimSpace(string(out)))
+			}
+
+			cfg, _, err := loadDaemonConfig(cfgPath)
+			if err != nil {
+				return err
+			}
+			conn, err := ipcmsg.Dial(cfg.Options.SocketPath)
+			if err != nil {
+				return fmt.Errorf("daemon restarted but socket dial failed: %w", err)
+			}
+			defer conn.Close()
+			req := ipcmsg.Request{Method: "auth_nudge", Name: contextName}
+			if err := conn.SendRequest(req); err != nil {
+				return err
+			}
+			var resp struct {
+				OK    bool        `json:"ok"`
+				Error string      `json:"error,omitempty"`
+				Data  interface{} `json:"data,omitempty"`
+			}
+			if err := conn.ReadResponse(&resp); err != nil {
+				return err
+			}
+			if !resp.OK {
+				return errors.New(resp.Error)
+			}
+			b, err := json.MarshalIndent(resp.Data, "", "  ")
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Launchd daemon restarted and nudged.")
+			fmt.Fprintln(cmd.OutOrStdout(), string(b))
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&label, "label", "com.adrianmross.oci-context.daemon", "launchd label")
+	cmd.Flags().StringVar(&contextName, "context", "", "Target context name for nudge (default monitored list)")
+	return cmd
+}
+
+func newDaemonDoctorCmd() *cobra.Command {
+	var cfgPath string
+	var label string
+	var contextName string
+	cmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Diagnose daemon health and suggest remediation steps",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			issues := 0
+			cfg, path, err := loadDaemonConfig(cfgPath)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "config: %s\n", path)
+			fmt.Fprintf(cmd.OutOrStdout(), "socket: %s\n", cfg.Options.SocketPath)
+			if contextName == "" {
+				contextName = cfg.CurrentContext
+			}
+			if contextName != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "context: %s\n", contextName)
+			}
+
+			if runtime.GOOS == "darwin" {
+				target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
+				if out, err := exec.Command("launchctl", "print", target).CombinedOutput(); err != nil {
+					issues++
+					fmt.Fprintf(cmd.OutOrStdout(), "launchd: unhealthy (%v)\n", err)
+					trimmed := strings.TrimSpace(string(out))
+					if trimmed != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "launchd detail: %s\n", trimmed)
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), "fix: oci-context daemon install")
+				} else {
+					state := "unknown"
+					s := string(out)
+					switch {
+					case strings.Contains(s, "state = running"):
+						state = "running"
+					case strings.Contains(s, "state = waiting"):
+						state = "waiting"
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "launchd: %s (%s)\n", target, state)
+				}
+			}
+
+			conn, err := ipcmsg.Dial(cfg.Options.SocketPath)
+			if err != nil {
+				issues++
+				fmt.Fprintf(cmd.OutOrStdout(), "ipc: unhealthy (%v)\n", err)
+				if runtime.GOOS == "darwin" {
+					fmt.Fprintln(cmd.OutOrStdout(), "fix: oci-context daemon install")
+				} else {
+					fmt.Fprintln(cmd.OutOrStdout(), "fix: oci-context daemon serve --auto-refresh")
+				}
+			} else {
+				defer conn.Close()
+				req := ipcmsg.Request{Method: "auth_status", Name: contextName}
+				if err := conn.SendRequest(req); err != nil {
+					issues++
+					fmt.Fprintf(cmd.OutOrStdout(), "auth-status: unhealthy (%v)\n", err)
+				} else {
+					var resp struct {
+						OK    bool              `json:"ok"`
+						Error string            `json:"error,omitempty"`
+						Data  daemon.AuthStatus `json:"data,omitempty"`
+					}
+					if err := conn.ReadResponse(&resp); err != nil {
+						issues++
+						fmt.Fprintf(cmd.OutOrStdout(), "auth-status: unhealthy (%v)\n", err)
+					} else if !resp.OK {
+						issues++
+						fmt.Fprintf(cmd.OutOrStdout(), "auth-status: unhealthy (%s)\n", resp.Error)
+					} else {
+						fmt.Fprintf(
+							cmd.OutOrStdout(),
+							"auth-status: ok (context=%s validate_ok=%t refresh_ok=%t)\n",
+							resp.Data.ContextName,
+							resp.Data.LastValidateOK,
+							resp.Data.LastRefreshOK,
+						)
+					}
+				}
+			}
+
+			if issues > 0 {
+				return fmt.Errorf("doctor found %d issue(s)", issues)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "doctor: healthy")
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&label, "label", "com.adrianmross.oci-context.daemon", "launchd label")
+	cmd.Flags().StringVar(&contextName, "context", "", "Target context name (default current)")
 	return cmd
 }
 
