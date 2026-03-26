@@ -32,8 +32,10 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 ## Background Service
 - macOS: install/reload launchd daemon in one step:
   - `oci-context daemon install`
+  - alias: `oci-context daemon up`
 - macOS: quick restart + nudge when returning to machine:
   - `oci-context daemon recover`
+  - alias: `oci-context daemon fix`
 - macOS: generate launchd plist with:
   - `oci-context daemon launchd generate ...`
 - macOS: optional actionable wake notifications with Hammerspoon:
