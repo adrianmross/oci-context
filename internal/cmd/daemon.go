@@ -58,9 +58,9 @@ func newDaemonRecoverCmd() *cobra.Command {
 				return fmt.Errorf("daemon recover is only supported on macOS")
 			}
 			target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
-				if out, err := runCombinedOutput(cmd.OutOrStdout(), "launchctl", "kickstart", "-k", target); err != nil {
-					return fmt.Errorf("launchctl kickstart failed: %v: %s (run `oci-context daemon install` to reinstall/reload service)", err, strings.TrimSpace(string(out)))
-				}
+			if out, err := runCombinedOutput(cmd.OutOrStdout(), "launchctl", "kickstart", "-k", target); err != nil {
+				return fmt.Errorf("launchctl kickstart failed: %v: %s (run `oci-context daemon install` to reinstall/reload service)", err, strings.TrimSpace(string(out)))
+			}
 
 			cfg, _, err := loadDaemonConfig(cfgPath)
 			if err != nil {
@@ -128,7 +128,7 @@ func newDaemonDoctorCmd() *cobra.Command {
 
 			if runtime.GOOS == "darwin" {
 				target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
-					if out, err := runCombinedOutput(cmd.OutOrStdout(), "launchctl", "print", target); err != nil {
+				if out, err := runCombinedOutput(cmd.OutOrStdout(), "launchctl", "print", target); err != nil {
 					issues++
 					fmt.Fprintf(cmd.OutOrStdout(), "launchd: unhealthy (%v)\n", err)
 					trimmed := strings.TrimSpace(string(out))
@@ -713,8 +713,8 @@ func newDaemonMonitorClearCmd() *cobra.Command {
 
 func newDaemonLaunchdCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "launchd",
-		Short: "Generate/install launchd configuration for daemon",
+		Use:        "launchd",
+		Short:      "Generate/install launchd configuration for daemon",
 		Deprecated: "use `oci-context daemon install launchd` or `oci-context daemon install`",
 	}
 	cmd.AddCommand(newDaemonLaunchdGenerateCmd())
@@ -723,8 +723,8 @@ func newDaemonLaunchdCmd() *cobra.Command {
 
 func newDaemonSleepwatcherCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "sleepwatcher",
-		Short: "Install wake automation that nudges daemon auth checks",
+		Use:        "sleepwatcher",
+		Short:      "Install wake automation that nudges daemon auth checks",
 		Deprecated: "use `oci-context daemon install sleepwatcher`",
 	}
 	cmd.AddCommand(newDaemonSleepwatcherInstallCmd())
@@ -733,8 +733,8 @@ func newDaemonSleepwatcherCmd() *cobra.Command {
 
 func newDaemonHammerspoonCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "hammerspoon",
-		Short: "Install Hammerspoon auth notifications and wake automation",
+		Use:        "hammerspoon",
+		Short:      "Install Hammerspoon auth notifications and wake automation",
 		Deprecated: "use `oci-context daemon install hammerspoon`",
 	}
 	cmd.AddCommand(newDaemonHammerspoonInstallCmd())
