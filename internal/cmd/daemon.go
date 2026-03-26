@@ -66,7 +66,7 @@ func newDaemonRecoverCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			conn, err := ipcmsg.Dial(cfg.Options.SocketPath)
+			conn, err := dialDaemonSocketWithRetry(cfg.Options.SocketPath, 5*time.Second)
 			if err != nil {
 				return fmt.Errorf("daemon restarted but socket dial failed: %w", err)
 			}
@@ -1074,6 +1074,23 @@ func loadDaemonConfig(cfgPath string) (config.Config, string, error) {
 	return cfg, path, nil
 }
 
+func dialDaemonSocketWithRetry(socketPath string, timeout time.Duration) (*ipcmsg.Conn, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		conn, err := ipcmsg.Dial(socketPath)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return nil, lastErr
+}
+
 func resolveLaunchdPaths(cfgPath, label, binaryPath, outPath, stdoutPath, stderrPath string) (string, string, string, string, string, error) {
 	path, err := daemon.EnsureConfig(cfgPath)
 	if err != nil {
@@ -1185,6 +1202,11 @@ func renderLaunchdPlist(label, binaryPath, cfgPath string, autoRefresh bool, val
     <true/>
     <key>ProcessType</key>
     <string>Background</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
     <key>StandardOutPath</key>
     <string>%s</string>
     <key>StandardErrorPath</key>

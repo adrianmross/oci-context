@@ -28,6 +28,9 @@ func TestRenderLaunchdPlistIncludesArgs(t *testing.T) {
 		"<string>--auto-refresh</string>",
 		"<string>5m0s</string>",
 		"<string>15m0s</string>",
+		"<key>EnvironmentVariables</key>",
+		"<key>PATH</key>",
+		"<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>",
 	} {
 		if !strings.Contains(plist, want) {
 			t.Fatalf("expected plist to contain %q", want)
