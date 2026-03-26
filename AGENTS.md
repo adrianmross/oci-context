@@ -29,6 +29,8 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 - If refresh fails persistently, re-authenticate (`oci session authenticate ...`).
 
 ## Background Service
+- macOS: install/reload launchd daemon in one step:
+  - `oci-context daemon install`
 - macOS: generate launchd plist with:
   - `oci-context daemon launchd generate ...`
 - macOS: optional actionable wake notifications with Hammerspoon:

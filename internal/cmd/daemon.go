@@ -23,6 +23,7 @@ func newDaemonCmd() *cobra.Command {
 		Use:   "daemon",
 		Short: "Manage the oci-context daemon",
 	}
+	cmd.AddCommand(newDaemonInstallCmd())
 	cmd.AddCommand(newDaemonServeCmd())
 	cmd.AddCommand(newDaemonAuthStatusCmd())
 	cmd.AddCommand(newDaemonNudgeCmd())
@@ -30,6 +31,120 @@ func newDaemonCmd() *cobra.Command {
 	cmd.AddCommand(newDaemonLaunchdCmd())
 	cmd.AddCommand(newDaemonSleepwatcherCmd())
 	cmd.AddCommand(newDaemonHammerspoonCmd())
+	return cmd
+}
+
+func newDaemonInstallCmd() *cobra.Command {
+	var cfgPath string
+	var label string
+	var binaryPath string
+	var outPath string
+	var stdoutPath string
+	var stderrPath string
+	var autoRefresh bool
+	var validateInterval time.Duration
+	var refreshInterval time.Duration
+	var loadNow bool
+	var kickstart bool
+
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install/refresh launchd daemon service and restart it",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runtime.GOOS != "darwin" {
+				return fmt.Errorf("daemon install is only supported on macOS")
+			}
+
+			path, err := daemon.EnsureConfig(cfgPath)
+			if err != nil {
+				return err
+			}
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			if binaryPath == "" {
+				if bin, lookErr := exec.LookPath("oci-context"); lookErr == nil {
+					binaryPath = bin
+				}
+			}
+			if binaryPath == "" {
+				exe, exeErr := os.Executable()
+				if exeErr == nil {
+					binaryPath = exe
+				}
+			}
+			if binaryPath == "" {
+				return fmt.Errorf("could not resolve oci-context binary path; pass --binary")
+			}
+			if stdoutPath == "" {
+				stdoutPath = filepath.Join(home, ".oci-context", "daemon.out.log")
+			}
+			if stderrPath == "" {
+				stderrPath = filepath.Join(home, ".oci-context", "daemon.err.log")
+			}
+			if outPath == "" {
+				outPath = filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+			}
+
+			plist := renderLaunchdPlist(label, binaryPath, path, autoRefresh, validateInterval, refreshInterval, stdoutPath, stderrPath)
+			if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(stdoutPath), 0o755); err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(stderrPath), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(outPath, []byte(plist), 0o644); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote launchd plist: %s\n", outPath)
+
+			if !loadNow {
+				fmt.Fprintf(
+					cmd.OutOrStdout(),
+					"Load with:\nlaunchctl unload %s 2>/dev/null || true\nlaunchctl load %s\nlaunchctl start %s\n",
+					outPath,
+					outPath,
+					label,
+				)
+				return nil
+			}
+
+			_ = exec.Command("launchctl", "unload", outPath).Run()
+			if out, err := exec.Command("launchctl", "load", outPath).CombinedOutput(); err != nil {
+				return fmt.Errorf("launchctl load failed: %v: %s", err, strings.TrimSpace(string(out)))
+			}
+			if out, err := exec.Command("launchctl", "start", label).CombinedOutput(); err != nil {
+				return fmt.Errorf("launchctl start failed: %v: %s", err, strings.TrimSpace(string(out)))
+			}
+
+			if kickstart {
+				target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
+				if out, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
+					return fmt.Errorf("launchctl kickstart failed: %v: %s", err, strings.TrimSpace(string(out)))
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Loaded and restarted launchd job: %s\n", target)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "Loaded and started launchd job: %s\n", label)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&label, "label", "com.adrianmross.oci-context.daemon", "launchd label")
+	cmd.Flags().StringVar(&binaryPath, "binary", "", "Absolute path to oci-context binary")
+	cmd.Flags().StringVar(&outPath, "out", "", "Output plist path (default ~/Library/LaunchAgents/<label>.plist)")
+	cmd.Flags().StringVar(&stdoutPath, "stdout-log", "", "stdout log path")
+	cmd.Flags().StringVar(&stderrPath, "stderr-log", "", "stderr log path")
+	cmd.Flags().BoolVar(&autoRefresh, "auto-refresh", true, "Enable daemon auth validate/refresh loop")
+	cmd.Flags().DurationVar(&validateInterval, "validate-interval", 5*time.Minute, "How often to validate auth")
+	cmd.Flags().DurationVar(&refreshInterval, "refresh-interval", 15*time.Minute, "How often to refresh security-token auth")
+	cmd.Flags().BoolVar(&loadNow, "load", true, "Load and start launchd agent after writing files")
+	cmd.Flags().BoolVar(&kickstart, "kickstart", true, "Kickstart launchd job after load/start to force a process restart")
 	return cmd
 }
 

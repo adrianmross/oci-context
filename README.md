@@ -103,6 +103,7 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 - `oci-context export --format env|json`
 - `oci-context auth methods|show|set|set-user|login|refresh|validate|setup|notify`
 - `oci-context daemon serve [--auto-refresh --validate-interval 5m --refresh-interval 15m]`
+- `oci-context daemon install` (macOS one-shot install/reload for launchd)
 - `oci-context daemon auth-status [--context <name>]`
 - `oci-context daemon nudge [--context <name>]`
 - `oci-context daemon monitor list|add|remove|clear`
@@ -222,6 +223,14 @@ oci-context auth show --context dev
 
 ## Background Service
 ### macOS (`launchd`)
+One-shot install/reload (recommended):
+
+```sh
+oci-context daemon install --auto-refresh
+```
+
+This writes the launchd plist, (re)loads it, and kickstarts the job so the running daemon uses the current binary.
+
 Generate a plist:
 
 ```sh
