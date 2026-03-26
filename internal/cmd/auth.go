@@ -184,6 +184,7 @@ func newAuthCmd() *cobra.Command {
 		Use:   "auth",
 		Short: "Manage context auth method and identity workflows",
 	}
+	cmd.AddCommand(newNotifyCmd("notify", "Trigger auth notification (Hammerspoon + native macOS)"))
 
 	resolvePath := func(cmd *cobra.Command) (string, error) {
 		g, err := cmd.Flags().GetBool("global")

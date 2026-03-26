@@ -291,7 +291,6 @@ func newDaemonHammerspoonCmd() *cobra.Command {
 		Short: "Install Hammerspoon auth notifications and wake automation",
 	}
 	cmd.AddCommand(newDaemonHammerspoonInstallCmd())
-	cmd.AddCommand(newDaemonHammerspoonNotifyCmd())
 	return cmd
 }
 
@@ -384,7 +383,7 @@ func newDaemonHammerspoonInstallCmd() *cobra.Command {
 	return cmd
 }
 
-func newDaemonHammerspoonNotifyCmd() *cobra.Command {
+func newNotifyCmd(use, short string) *cobra.Command {
 	var (
 		cfgPath      string
 		contextName  string
@@ -392,11 +391,12 @@ func newDaemonHammerspoonNotifyCmd() *cobra.Command {
 		profile      string
 		region       string
 		tenancyName  string
+		nativeNotify bool
 		printOnlyURL bool
 	)
 	cmd := &cobra.Command{
-		Use:   "notify",
-		Short: "Trigger Hammerspoon actionable auth notification",
+		Use:   use,
+		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if runtime.GOOS != "darwin" {
 				return fmt.Errorf("hammerspoon notify is only supported on macOS")
@@ -439,6 +439,15 @@ func newDaemonHammerspoonNotifyCmd() *cobra.Command {
 			if out, err := exec.Command("open", "-g", eventURL).CombinedOutput(); err != nil {
 				return fmt.Errorf("failed to trigger hammerspoon event: %v: %s", err, strings.TrimSpace(string(out)))
 			}
+			if nativeNotify {
+				msg := fmt.Sprintf("Auth check for %s (%s)", ctxName, prof)
+				if strings.TrimSpace(reason) != "" {
+					msg = fmt.Sprintf("%s\n%s", msg, reason)
+				}
+				if err := sendNativeAuthNotification(eventURL, msg, "oci-context", "Remote trigger"); err != nil {
+					return fmt.Errorf("hammerspoon event sent but native notification failed: %w", err)
+				}
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Triggered Hammerspoon notification for context=%s profile=%s region=%s\n", ctxName, prof, reg)
 			return nil
 		},
@@ -449,6 +458,7 @@ func newDaemonHammerspoonNotifyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&profile, "profile", "", "Override profile passed to Hammerspoon event")
 	cmd.Flags().StringVar(&region, "region", "", "Override region passed to Hammerspoon event")
 	cmd.Flags().StringVar(&tenancyName, "tenancy-name", "", "Optional tenancy name passed to session authenticate")
+	cmd.Flags().BoolVar(&nativeNotify, "native-notify", false, "Also send a native macOS notification (terminal-notifier when available, otherwise osascript)")
 	cmd.Flags().BoolVar(&printOnlyURL, "print-url", false, "Print event URL instead of opening it")
 	return cmd
 }
@@ -724,224 +734,6 @@ launchctl kickstart -k gui/$(id -u)/%s >/dev/null 2>&1 || true
 `, daemonLabel, shellQuote(ociContextBin))
 }
 
-func renderWakeupScriptWithHammerspoon(ociContextBin, daemonLabel string) string {
-	return fmt.Sprintf(`#!/bin/zsh
-set -euo pipefail
-
-OCI_CONTEXT_BIN=%s
-DAEMON_LABEL=%s
-
-notify() {
-  local msg="$1"
-  local subtitle="$2"
-  /usr/bin/osascript -e "display notification \"${msg}\" with title \"oci-context\" subtitle \"${subtitle}\"" >/dev/null 2>&1 || true
-}
-
-notify_actionable() {
-  local profile="$1"
-  local context_name="$2"
-  local reason="$3"
-  local region="$4"
-
-  if [ -n "${profile}" ] && [ -n "${context_name}" ]; then
-    local url
-    url="hammerspoon://oci-auth-needed?profile=${profile}&context=${context_name}&region=${region}&reason=wake_auth_check_failed"
-    /usr/bin/open -g "${url}" >/dev/null 2>&1 && return 0
-  fi
-
-  local hint="Run: oci session authenticate"
-  if [ -n "${profile}" ]; then
-    hint="Run: oci session authenticate --profile ${profile}"
-  fi
-  local msg="Auth unhealthy for ${context_name:-current}. ${hint}"
-  if [ -n "${reason}" ]; then
-    msg="${msg}. ${reason}"
-  fi
-  notify "${msg}" "Wake auth check"
-}
-
-extract_string() {
-  local key="$1"
-  printf '%%s' "$status_json" | tr -d '\n' | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p"
-}
-
-extract_bool() {
-  local key="$1"
-  printf '%%s' "$status_json" | tr -d '\n' | sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\\(true\\|false\\).*/\\1/p"
-}
-
-extract_context_region() {
-  local target_context="$1"
-  if [ -z "${target_context}" ]; then
-    return 0
-  fi
-  "${OCI_CONTEXT_BIN}" list -v 2>/dev/null | awk -v target="${target_context}" '
-    {
-      line=$0
-      sub(/^[* ]+/, "", line)
-      name=line
-      sub(/ .*/, "", name)
-      if (name == target) {
-        if (match(line, /region=[^ )]+/)) {
-          print substr(line, RSTART+7, RLENGTH-7)
-          exit
-        }
-      }
-    }
-  '
-}
-
-launchctl kickstart -k "gui/$(id -u)/${DAEMON_LABEL}" >/dev/null 2>&1 || true
-"${OCI_CONTEXT_BIN}" daemon nudge >/dev/null 2>&1 || true
-
-sleep 2
-status_json="$("${OCI_CONTEXT_BIN}" daemon auth-status 2>/dev/null || true)"
-
-if [ -z "${status_json}" ]; then
-  notify_actionable "${profile:-}" "${context_name:-current}" "Daemon status unavailable after wake" ""
-  exit 0
-fi
-
-context_name="$(extract_string context_name)"
-auth_method="$(extract_string auth_method)"
-last_validate_ok="$(extract_bool last_validate_ok)"
-last_refresh_ok="$(extract_bool last_refresh_ok)"
-last_error="$(extract_string last_error)"
-
-profile=""
-if [ -n "${context_name}" ]; then
-  profile="$("${OCI_CONTEXT_BIN}" auth show --context "${context_name}" 2>/dev/null | sed -n 's/^profile: //p' | head -n1)"
-fi
-region="$(extract_context_region "${context_name}" | head -n1)"
-
-if [ "${auth_method}" = "security_token" ]; then
-  if [ "${last_validate_ok}" != "true" ] || [ "${last_refresh_ok}" != "true" ]; then
-    notify_actionable "${profile}" "${context_name}" "${last_error}" "${region}"
-  fi
-else
-  if [ "${last_validate_ok}" != "true" ]; then
-    notify_actionable "${profile}" "${context_name}" "${last_error}" "${region}"
-  fi
-fi
-`, shellQuote(ociContextBin), shellQuote(daemonLabel))
-}
-
-func renderHammerspoonModule() string {
-	return `local function findOciBin()
-  local candidates = {
-    "/usr/local/bin/oci",
-    "/opt/homebrew/bin/oci",
-    "/usr/bin/oci",
-  }
-  for _, p in ipairs(candidates) do
-    if hs.fs.attributes(p, "mode") then
-      return p
-    end
-  end
-  return "oci"
-end
-
-local function findOciContextBin()
-  local candidates = {
-    "/usr/local/bin/oci-context",
-    "/opt/homebrew/bin/oci-context",
-    "/usr/bin/oci-context",
-  }
-  for _, p in ipairs(candidates) do
-    if hs.fs.attributes(p, "mode") then
-      return p
-    end
-  end
-  return "oci-context"
-end
-
-local function shellQuote(s)
-  return "'" .. tostring(s):gsub("'", "'\"'\"'") .. "'"
-end
-
-local function runOciAuthenticate(profile, region, contextName, tenancyName)
-  local oci = findOciBin()
-  local p = (profile and profile ~= "") and profile or "DEFAULT"
-  local cmd = string.format("%s session authenticate --profile-name %s", shellQuote(oci), shellQuote(p))
-  if region and region ~= "" then
-    cmd = cmd .. " --region " .. shellQuote(region)
-  end
-  if tenancyName and tenancyName ~= "" then
-    cmd = cmd .. " --tenancy-name " .. shellQuote(tenancyName)
-  end
-
-  hs.notify.new({
-    title = "oci-context",
-    informativeText = string.format("Starting auth for profile %s", p),
-    autoWithdraw = true,
-  }):send()
-
-  hs.task.new("/bin/zsh", function(exitCode, stdOut, stdErr)
-    local text = ""
-    if exitCode == 0 then
-      text = "Authentication command completed for profile " .. p
-    else
-      text = "Authentication failed for profile " .. p .. ". Check ~/.hammerspoon/oci-auth.log"
-    end
-    hs.notify.new({
-      title = "oci-context",
-      informativeText = text,
-      autoWithdraw = true,
-    }):send()
-
-    local logPath = os.getenv("HOME") .. "/.hammerspoon/oci-auth.log"
-    local f = io.open(logPath, "a")
-    if f then
-      f:write("\n--- " .. os.date("!%Y-%m-%dT%H:%M:%SZ") .. " ---\n")
-      f:write("cmd: " .. cmd .. "\n")
-      f:write("exit: " .. tostring(exitCode) .. "\n")
-      if stdOut and stdOut ~= "" then
-        f:write("stdout:\n" .. stdOut .. "\n")
-      end
-      if stdErr and stdErr ~= "" then
-        f:write("stderr:\n" .. stdErr .. "\n")
-      end
-      f:close()
-    end
-    return true
-  end, { "-lc", cmd }):start()
-end
-
-local function showAuthNeededNotification(profile, contextName, reason, region, tenancyName)
-  local p = (profile and profile ~= "") and profile or "DEFAULT"
-  local ctx = (contextName and contextName ~= "") and contextName or "current"
-  local msg = string.format("Auth unhealthy for %s (%s)", ctx, p)
-  if reason and reason ~= "" then
-    msg = msg .. "\n" .. reason
-  end
-
-  local n = hs.notify.new(function(notification)
-    local activation = notification:activationType()
-    if activation == hs.notify.activationTypes.actionButtonClicked or activation == hs.notify.activationTypes.contentsClicked then
-      runOciAuthenticate(p, region, contextName, tenancyName)
-    end
-  end, {
-    title = "oci-context",
-    informativeText = msg,
-    actionButtonTitle = "Re-auth now",
-    hasActionButton = true,
-    autoWithdraw = true,
-  })
-
-  n:send()
-end
-
-hs.urlevent.bind("oci-auth-needed", function(_, params, _)
-  local profile = params and params.profile or "DEFAULT"
-  local contextName = params and params.context or "current"
-  local reason = params and params.reason or ""
-  local region = params and params.region or ""
-  local tenancyName = params and params.tenancy_name or ""
-  showAuthNeededNotification(profile, contextName, reason, region, tenancyName)
-end)
-`
-}
-
 func ensureHammerspoonInitLoadsModule(initPath string) error {
 	const marker1 = `pcall(require, "oci_context")`
 	const marker2 = `dofile(hs.configdir .. "/oci_context.lua")`
@@ -987,6 +779,44 @@ func buildHammerspoonAuthNeededURL(profile, contextName, region, reason, tenancy
 		q.Set("tenancy_name", strings.TrimSpace(tenancyName))
 	}
 	return "hammerspoon://oci-auth-needed?" + q.Encode()
+}
+
+func buildAppleScriptDisplayNotification(message, title, subtitle string) string {
+	escape := func(s string) string {
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		s = strings.ReplaceAll(s, `"`, `\"`)
+		return s
+	}
+	return fmt.Sprintf(
+		`display notification "%s" with title "%s" subtitle "%s"`,
+		escape(message),
+		escape(title),
+		escape(subtitle),
+	)
+}
+
+func buildTerminalNotifierArgs(eventURL, message, title, subtitle string) []string {
+	return []string{
+		"-title", title,
+		"-subtitle", subtitle,
+		"-message", message,
+		"-open", eventURL,
+	}
+}
+
+func sendNativeAuthNotification(eventURL, message, title, subtitle string) error {
+	if tnPath, err := exec.LookPath("terminal-notifier"); err == nil {
+		args := buildTerminalNotifierArgs(eventURL, message, title, subtitle)
+		if out, err := exec.Command(tnPath, args...).CombinedOutput(); err != nil {
+			return fmt.Errorf("terminal-notifier failed: %v: %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	script := buildAppleScriptDisplayNotification(message, title, subtitle)
+	if out, err := exec.Command("osascript", "-e", script).CombinedOutput(); err != nil {
+		return fmt.Errorf("osascript failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func renderSleepwatcherPlist(label, sleepwatcherBin, wakeupScript string) string {

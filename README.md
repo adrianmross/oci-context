@@ -101,7 +101,7 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 - `oci-context delete <name>`
 - `oci-context status`
 - `oci-context export --format env|json`
-- `oci-context auth methods|show|set|set-user|login|refresh|validate|setup`
+- `oci-context auth methods|show|set|set-user|login|refresh|validate|setup|notify`
 - `oci-context daemon serve [--auto-refresh --validate-interval 5m --refresh-interval 15m]`
 - `oci-context daemon auth-status [--context <name>]`
 - `oci-context daemon nudge [--context <name>]`
@@ -109,7 +109,7 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 - `oci-context daemon launchd generate` (macOS)
 - `oci-context daemon sleepwatcher install` (macOS wake hook automation)
 - `oci-context daemon hammerspoon install` (macOS actionable wake notifications)
-- `oci-context daemon hammerspoon notify` (macOS manual trigger)
+- `oci-context auth notify` (macOS manual trigger)
 - `oci-context tui`
 
 ### OCI CLI Defaults (Transparent `oci` Usage)
@@ -277,11 +277,13 @@ open -g 'hammerspoon://reloadConfig'
 Manually trigger an actionable notification from CLI:
 
 ```sh
-oci-context daemon hammerspoon notify --context dev --reason "manual check"
-oci-context daemon hammerspoon notify --context dev --reason "manual check" --tenancy-name your-tenancy
+oci-context auth notify --context dev --reason "manual check"
+oci-context auth notify --context dev --reason "manual check" --tenancy-name your-tenancy
 ```
 
 `--tenancy-name` is optional. When omitted, `notify` uses the selected context's `tenancy_ocid`.
+`--native-notify` defaults to false; enable it if you also want a native macOS notification.
+If `terminal-notifier` is installed, `notify` uses it and clicking the native notification opens the Hammerspoon URL action.
 
 ### Linux (`systemd`, user service)
 Example unit file (`~/.config/systemd/user/oci-context-daemon.service`):
