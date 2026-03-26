@@ -103,15 +103,13 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 - `oci-context export --format env|json`
 - `oci-context auth methods|show|set|set-user|login|refresh|validate|setup|notify`
 - `oci-context daemon serve [--auto-refresh --validate-interval 5m --refresh-interval 15m]`
-- `oci-context daemon install` (macOS one-shot install/reload for launchd)
-- `oci-context daemon recover` (macOS one-command restart + nudge)
+- `oci-context daemon install` (installer entrypoint; use subcommands for specific targets)
+- `oci-context daemon up` (one-command restart + nudge after return/wake)
 - `oci-context daemon doctor` (diagnose daemon/service/socket/auth health)
 - `oci-context daemon auth-status [--context <name>]`
 - `oci-context daemon nudge [--context <name>]`
 - `oci-context daemon monitor list|add|remove|clear`
-- `oci-context daemon launchd generate` (macOS)
-- `oci-context daemon sleepwatcher install` (macOS wake hook automation)
-- `oci-context daemon hammerspoon install` (macOS actionable wake notifications)
+- `oci-context daemon install launchd|sleepwatcher|hammerspoon|systemd`
 - `oci-context auth notify` (macOS manual trigger)
 - `oci-context tui`
 
@@ -236,7 +234,7 @@ This writes the launchd plist, (re)loads it, and kickstarts the job so the runni
 Quick recovery when you return to your computer:
 
 ```sh
-oci-context daemon recover
+oci-context daemon up
 ```
 
 This kickstarts the launchd daemon and sends an immediate nudge.
@@ -248,14 +246,13 @@ oci-context daemon doctor
 ```
 
 Short aliases:
-- `oci-context daemon up` == `oci-context daemon install`
-- `oci-context daemon fix` == `oci-context daemon recover`
+- `oci-context daemon fix` == `oci-context daemon recover` == `oci-context daemon up`
 - `oci-context daemon check` == `oci-context daemon doctor`
 
 Generate a plist:
 
 ```sh
-oci-context daemon launchd generate \
+oci-context daemon install launchd \
   --binary /path/to/oci-context \
   --config ~/.oci-context/config.yml \
   --auto-refresh \
@@ -282,7 +279,7 @@ Install wake hook automation (restarts daemon + nudges auth checks on wake):
 
 ```sh
 brew install sleepwatcher
-oci-context daemon sleepwatcher install
+oci-context daemon install sleepwatcher
 ```
 
 ### Actionable wake notifications with Hammerspoon (macOS)
@@ -290,7 +287,7 @@ Install managed Hammerspoon integration plus a wake hook script that sends click
 
 ```sh
 brew install --cask hammerspoon
-oci-context daemon hammerspoon install
+oci-context daemon install hammerspoon
 ```
 
 Notes:
@@ -316,6 +313,14 @@ oci-context auth notify --context dev --reason "manual check" --tenancy-name you
 If `terminal-notifier` is installed, `notify` uses it and clicking the native notification opens the Hammerspoon URL action.
 
 ### Linux (`systemd`, user service)
+One-shot install for a user service:
+
+```sh
+oci-context daemon install systemd
+```
+
+or generate manually:
+
 Example unit file (`~/.config/systemd/user/oci-context-daemon.service`):
 
 ```ini

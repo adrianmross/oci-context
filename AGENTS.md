@@ -32,18 +32,18 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 ## Background Service
 - macOS: install/reload launchd daemon in one step:
   - `oci-context daemon install`
-  - alias: `oci-context daemon up`
+- specific targets: `oci-context daemon install launchd|sleepwatcher|hammerspoon`
 - macOS: quick restart + nudge when returning to machine:
-  - `oci-context daemon recover`
-  - alias: `oci-context daemon fix`
+  - `oci-context daemon up`
+  - aliases: `oci-context daemon recover`, `oci-context daemon fix`
 - macOS: generate launchd plist with:
-  - `oci-context daemon launchd generate ...`
+  - `oci-context daemon install launchd ...` (or legacy `daemon launchd generate`)
 - macOS: optional actionable wake notifications with Hammerspoon:
-  - `oci-context daemon hammerspoon install`
+  - `oci-context daemon install hammerspoon`
   - `oci-context auth notify [--context <name>]`
 - After reinstalling/upgrading the binary, restart the launchd job so the daemon does not keep serving stale code:
   - `launchctl kickstart -k gui/$(id -u)/<launchd-label>`
-- Linux: use a `systemd --user` service.
+- Linux: use `oci-context daemon install systemd` (or a manual `systemd --user` service).
 - Prefer a packaged/static binary path for service definitions rather than `go run`.
 
 ## Documentation Expectations

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -47,6 +48,7 @@ func newDaemonRecoverCmd() *cobra.Command {
 		Short: "Restart launchd daemon and trigger immediate auth maintenance (macOS)",
 		Aliases: []string{
 			"fix",
+			"up",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if runtime.GOOS != "darwin" {
@@ -197,6 +199,72 @@ func newDaemonDoctorCmd() *cobra.Command {
 }
 
 func newDaemonInstallCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install daemon integrations for your OS",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch runtime.GOOS {
+			case "darwin":
+				if err := runDaemonLaunchdInstall(
+					cmd.OutOrStdout(),
+					"",
+					daemonLaunchdDefaultLabel,
+					"",
+					"",
+					"",
+					"",
+					true,
+					5*time.Minute,
+					15*time.Minute,
+					true,
+					true,
+				); err != nil {
+					return err
+				}
+				if err := runDaemonHammerspoonInstall(
+					cmd.OutOrStdout(),
+					"",
+					daemonLaunchdDefaultLabel,
+					"",
+					"",
+					"",
+					false,
+				); err != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "warning: hammerspoon install skipped/failed: %v\n", err)
+				}
+				if _, lookErr := exec.LookPath("sleepwatcher"); lookErr == nil {
+					if err := runDaemonSleepwatcherInstall(
+						cmd.OutOrStdout(),
+						"",
+						daemonLaunchdDefaultLabel,
+						"",
+						"",
+						"",
+						"",
+						true,
+					); err != nil {
+						fmt.Fprintf(cmd.OutOrStdout(), "warning: sleepwatcher install failed: %v\n", err)
+					}
+				} else {
+					fmt.Fprintln(cmd.OutOrStdout(), "sleepwatcher not found; skipping. Install with `brew install sleepwatcher` then run `oci-context daemon install sleepwatcher`.")
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "Install complete. Use `oci-context daemon up` after wake/resume.")
+				return nil
+			case "linux":
+				return fmt.Errorf("on Linux use `oci-context daemon install systemd`")
+			default:
+				return fmt.Errorf("daemon install is not supported on %s", runtime.GOOS)
+			}
+		},
+	}
+	cmd.AddCommand(newDaemonInstallLaunchdCmd())
+	cmd.AddCommand(newDaemonInstallSleepwatcherCmd())
+	cmd.AddCommand(newDaemonInstallHammerspoonCmd())
+	cmd.AddCommand(newDaemonInstallSystemdCmd())
+	return cmd
+}
+
+func newDaemonInstallLaunchdCmd() *cobra.Command {
 	var cfgPath string
 	var label string
 	var binaryPath string
@@ -210,66 +278,10 @@ func newDaemonInstallCmd() *cobra.Command {
 	var kickstart bool
 
 	cmd := &cobra.Command{
-		Use:   "install",
+		Use:   "launchd",
 		Short: "Install/refresh launchd daemon service and restart it",
-		Aliases: []string{
-			"setup",
-			"up",
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if runtime.GOOS != "darwin" {
-				return fmt.Errorf("daemon install is only supported on macOS")
-			}
-
-			path, binaryPath, outPath, stdoutPath, stderrPath, err := resolveLaunchdPaths(cfgPath, label, binaryPath, outPath, stdoutPath, stderrPath)
-			if err != nil {
-				return err
-			}
-
-			plist := renderLaunchdPlist(label, binaryPath, path, autoRefresh, validateInterval, refreshInterval, stdoutPath, stderrPath)
-			if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(stdoutPath), 0o755); err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(stderrPath), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(outPath, []byte(plist), 0o644); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Wrote launchd plist: %s\n", outPath)
-
-			if !loadNow {
-				fmt.Fprintf(
-					cmd.OutOrStdout(),
-					"Load with:\nlaunchctl unload %s 2>/dev/null || true\nlaunchctl load %s\nlaunchctl start %s\n",
-					outPath,
-					outPath,
-					label,
-				)
-				return nil
-			}
-
-			_ = exec.Command("launchctl", "unload", outPath).Run()
-			if out, err := exec.Command("launchctl", "load", outPath).CombinedOutput(); err != nil {
-				return fmt.Errorf("launchctl load failed: %v: %s", err, strings.TrimSpace(string(out)))
-			}
-			if out, err := exec.Command("launchctl", "start", label).CombinedOutput(); err != nil {
-				return fmt.Errorf("launchctl start failed: %v: %s", err, strings.TrimSpace(string(out)))
-			}
-
-			if kickstart {
-				target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
-				if out, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
-					return fmt.Errorf("launchctl kickstart failed: %v: %s", err, strings.TrimSpace(string(out)))
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Loaded and restarted launchd job: %s\n", target)
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "Loaded and started launchd job: %s\n", label)
-			}
-			return nil
+			return runDaemonLaunchdInstall(cmd.OutOrStdout(), cfgPath, label, binaryPath, outPath, stdoutPath, stderrPath, autoRefresh, validateInterval, refreshInterval, loadNow, kickstart)
 		},
 	}
 
@@ -284,6 +296,177 @@ func newDaemonInstallCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&refreshInterval, "refresh-interval", 15*time.Minute, "How often to refresh security-token auth")
 	cmd.Flags().BoolVar(&loadNow, "load", true, "Load and start launchd agent after writing files")
 	cmd.Flags().BoolVar(&kickstart, "kickstart", true, "Kickstart launchd job after load/start to force a process restart")
+	return cmd
+}
+
+func runDaemonLaunchdInstall(out io.Writer, cfgPath, label, binaryPath, outPath, stdoutPath, stderrPath string, autoRefresh bool, validateInterval, refreshInterval time.Duration, loadNow, kickstart bool) error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("daemon launchd install is only supported on macOS")
+	}
+	path, binaryPath, outPath, stdoutPath, stderrPath, err := resolveLaunchdPaths(cfgPath, label, binaryPath, outPath, stdoutPath, stderrPath)
+	if err != nil {
+		return err
+	}
+	plist := renderLaunchdPlist(label, binaryPath, path, autoRefresh, validateInterval, refreshInterval, stdoutPath, stderrPath)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(stdoutPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(stderrPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(outPath, []byte(plist), 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Wrote launchd plist: %s\n", outPath)
+
+	if !loadNow {
+		fmt.Fprintf(out, "Load with:\nlaunchctl unload %s 2>/dev/null || true\nlaunchctl load %s\nlaunchctl start %s\n", outPath, outPath, label)
+		return nil
+	}
+
+	_ = exec.Command("launchctl", "unload", outPath).Run()
+	if b, err := exec.Command("launchctl", "load", outPath).CombinedOutput(); err != nil {
+		return fmt.Errorf("launchctl load failed: %v: %s", err, strings.TrimSpace(string(b)))
+	}
+	if b, err := exec.Command("launchctl", "start", label).CombinedOutput(); err != nil {
+		return fmt.Errorf("launchctl start failed: %v: %s", err, strings.TrimSpace(string(b)))
+	}
+
+	if kickstart {
+		target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
+		if b, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
+			return fmt.Errorf("launchctl kickstart failed: %v: %s", err, strings.TrimSpace(string(b)))
+		}
+		fmt.Fprintf(out, "Loaded and restarted launchd job: %s\n", target)
+	} else {
+		fmt.Fprintf(out, "Loaded and started launchd job: %s\n", label)
+	}
+	return nil
+}
+
+func newDaemonInstallSleepwatcherCmd() *cobra.Command {
+	var cfgPath string
+	var daemonLabel string
+	var wakeupScript string
+	var sleepwatcherPl string
+	var sleepwatcherBin string
+	var ociContextBin string
+	var loadNow bool
+
+	cmd := &cobra.Command{
+		Use:   "sleepwatcher",
+		Short: "Install sleepwatcher wake hook integration (macOS)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDaemonSleepwatcherInstall(cmd.OutOrStdout(), cfgPath, daemonLabel, wakeupScript, sleepwatcherPl, sleepwatcherBin, ociContextBin, loadNow)
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&daemonLabel, "daemon-label", daemonLaunchdDefaultLabel, "launchd label for oci-context daemon")
+	cmd.Flags().StringVar(&wakeupScript, "wakeup-script", "", "Path to write wake hook script (default ~/.wakeup)")
+	cmd.Flags().StringVar(&sleepwatcherPl, "plist", "", "Path to write sleepwatcher launchd plist")
+	cmd.Flags().StringVar(&sleepwatcherBin, "sleepwatcher-bin", "", "Absolute path to sleepwatcher binary")
+	cmd.Flags().StringVar(&ociContextBin, "oci-context-bin", "", "Absolute path to oci-context binary")
+	cmd.Flags().BoolVar(&loadNow, "load", true, "Load and start launchd agent after writing files")
+	return cmd
+}
+
+func newDaemonInstallHammerspoonCmd() *cobra.Command {
+	var cfgPath string
+	var daemonLabel string
+	var wakeupScript string
+	var hammerspoonDir string
+	var ociContextBin string
+	var reloadNow bool
+
+	cmd := &cobra.Command{
+		Use:   "hammerspoon",
+		Short: "Install Hammerspoon notification/auth integration (macOS)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDaemonHammerspoonInstall(cmd.OutOrStdout(), cfgPath, daemonLabel, wakeupScript, hammerspoonDir, ociContextBin, reloadNow)
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&daemonLabel, "daemon-label", daemonLaunchdDefaultLabel, "launchd label for oci-context daemon")
+	cmd.Flags().StringVar(&wakeupScript, "wakeup-script", "", "Path to write wake hook script (default ~/.wakeup)")
+	cmd.Flags().StringVar(&hammerspoonDir, "hammerspoon-dir", "", "Path to Hammerspoon config directory (default ~/.hammerspoon)")
+	cmd.Flags().StringVar(&ociContextBin, "oci-context-bin", "", "Absolute path to oci-context binary")
+	cmd.Flags().BoolVar(&reloadNow, "reload", true, "Launch Hammerspoon and reload config after writing files")
+	return cmd
+}
+
+func newDaemonInstallSystemdCmd() *cobra.Command {
+	var cfgPath string
+	var unitPath string
+	var binaryPath string
+	var autoRefresh bool
+	var validateInterval time.Duration
+	var refreshInterval time.Duration
+	var loadNow bool
+
+	cmd := &cobra.Command{
+		Use:   "systemd",
+		Short: "Install a user-level systemd service for daemon (Linux)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runtime.GOOS != "linux" {
+				return fmt.Errorf("systemd install is only supported on Linux")
+			}
+			path, err := daemon.EnsureConfig(cfgPath)
+			if err != nil {
+				return err
+			}
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			if binaryPath == "" {
+				if p, lookErr := exec.LookPath("oci-context"); lookErr == nil {
+					binaryPath = p
+				}
+			}
+			if binaryPath == "" {
+				exe, exeErr := os.Executable()
+				if exeErr == nil {
+					binaryPath = exe
+				}
+			}
+			if binaryPath == "" {
+				return fmt.Errorf("could not resolve oci-context binary path; pass --binary")
+			}
+			if unitPath == "" {
+				unitPath = filepath.Join(home, ".config", "systemd", "user", "oci-context-daemon.service")
+			}
+			if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
+				return err
+			}
+			content := renderSystemdUserUnit(binaryPath, path, autoRefresh, validateInterval, refreshInterval)
+			if err := os.WriteFile(unitPath, []byte(content), 0o644); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote systemd user unit: %s\n", unitPath)
+			if !loadNow {
+				fmt.Fprintln(cmd.OutOrStdout(), "Load with:\nsystemctl --user daemon-reload\nsystemctl --user enable --now oci-context-daemon.service")
+				return nil
+			}
+			if b, err := exec.Command("systemctl", "--user", "daemon-reload").CombinedOutput(); err != nil {
+				return fmt.Errorf("systemctl daemon-reload failed: %v: %s", err, strings.TrimSpace(string(b)))
+			}
+			if b, err := exec.Command("systemctl", "--user", "enable", "--now", "oci-context-daemon.service").CombinedOutput(); err != nil {
+				return fmt.Errorf("systemctl enable --now failed: %v: %s", err, strings.TrimSpace(string(b)))
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Enabled and started systemd user service: oci-context-daemon.service")
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&unitPath, "unit", "", "Output unit path (default ~/.config/systemd/user/oci-context-daemon.service)")
+	cmd.Flags().StringVar(&binaryPath, "binary", "", "Absolute path to oci-context binary")
+	cmd.Flags().BoolVar(&autoRefresh, "auto-refresh", true, "Enable daemon auth validate/refresh loop")
+	cmd.Flags().DurationVar(&validateInterval, "validate-interval", 5*time.Minute, "How often to validate auth")
+	cmd.Flags().DurationVar(&refreshInterval, "refresh-interval", 15*time.Minute, "How often to refresh security-token auth")
+	cmd.Flags().BoolVar(&loadNow, "load", true, "Reload and enable/start systemd user service")
 	return cmd
 }
 
@@ -525,6 +708,7 @@ func newDaemonLaunchdCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "launchd",
 		Short: "Generate/install launchd configuration for daemon",
+		Deprecated: "use `oci-context daemon install launchd` or `oci-context daemon install`",
 	}
 	cmd.AddCommand(newDaemonLaunchdGenerateCmd())
 	return cmd
@@ -534,6 +718,7 @@ func newDaemonSleepwatcherCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sleepwatcher",
 		Short: "Install wake automation that nudges daemon auth checks",
+		Deprecated: "use `oci-context daemon install sleepwatcher`",
 	}
 	cmd.AddCommand(newDaemonSleepwatcherInstallCmd())
 	return cmd
@@ -543,6 +728,7 @@ func newDaemonHammerspoonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hammerspoon",
 		Short: "Install Hammerspoon auth notifications and wake automation",
+		Deprecated: "use `oci-context daemon install hammerspoon`",
 	}
 	cmd.AddCommand(newDaemonHammerspoonInstallCmd())
 	return cmd
@@ -561,71 +747,7 @@ func newDaemonHammerspoonInstallCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Install managed Hammerspoon handler and wake script",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if runtime.GOOS != "darwin" {
-				return fmt.Errorf("hammerspoon install is only supported on macOS")
-			}
-			path, err := daemon.EnsureConfig(cfgPath)
-			if err != nil {
-				return err
-			}
-			_ = path
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			if ociContextBin == "" {
-				if p, lookErr := exec.LookPath("oci-context"); lookErr == nil {
-					ociContextBin = p
-				}
-			}
-			if ociContextBin == "" {
-				exe, exeErr := os.Executable()
-				if exeErr == nil {
-					ociContextBin = exe
-				}
-			}
-			if ociContextBin == "" {
-				return fmt.Errorf("could not resolve oci-context binary path; pass --oci-context-bin")
-			}
-			if wakeupScript == "" {
-				wakeupScript = filepath.Join(home, ".wakeup")
-			}
-			if hammerspoonDir == "" {
-				hammerspoonDir = filepath.Join(home, ".hammerspoon")
-			}
-
-			if err := os.MkdirAll(hammerspoonDir, 0o755); err != nil {
-				return err
-			}
-			modulePath := filepath.Join(hammerspoonDir, "oci_context.lua")
-			initPath := filepath.Join(hammerspoonDir, "init.lua")
-
-			if err := os.WriteFile(modulePath, []byte(renderHammerspoonModule()), 0o644); err != nil {
-				return err
-			}
-			if err := ensureHammerspoonInitLoadsModule(initPath); err != nil {
-				return err
-			}
-			if err := os.WriteFile(wakeupScript, []byte(renderWakeupScriptWithHammerspoon(ociContextBin, daemonLabel)), 0o755); err != nil {
-				return err
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "Wrote Hammerspoon module: %s\n", modulePath)
-			fmt.Fprintf(cmd.OutOrStdout(), "Updated Hammerspoon init: %s\n", initPath)
-			fmt.Fprintf(cmd.OutOrStdout(), "Wrote wake script: %s\n", wakeupScript)
-
-			if reloadNow {
-				if out, err := exec.Command("open", "-a", "Hammerspoon").CombinedOutput(); err != nil {
-					return fmt.Errorf("failed to launch Hammerspoon: %v: %s", err, strings.TrimSpace(string(out)))
-				}
-				if out, err := exec.Command("open", "-g", "hammerspoon://reloadConfig").CombinedOutput(); err != nil {
-					return fmt.Errorf("failed to reload Hammerspoon config: %v: %s", err, strings.TrimSpace(string(out)))
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), "Hammerspoon launched and config reloaded.")
-			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "Reload Hammerspoon config with: open -g 'hammerspoon://reloadConfig'")
-			}
-			return nil
+			return runDaemonHammerspoonInstall(cmd.OutOrStdout(), cfgPath, daemonLabel, wakeupScript, hammerspoonDir, ociContextBin, reloadNow)
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
@@ -635,6 +757,74 @@ func newDaemonHammerspoonInstallCmd() *cobra.Command {
 	cmd.Flags().StringVar(&ociContextBin, "oci-context-bin", "", "Absolute path to oci-context binary")
 	cmd.Flags().BoolVar(&reloadNow, "reload", true, "Launch Hammerspoon and reload config after writing files")
 	return cmd
+}
+
+func runDaemonHammerspoonInstall(out io.Writer, cfgPath, daemonLabel, wakeupScript, hammerspoonDir, ociContextBin string, reloadNow bool) error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("hammerspoon install is only supported on macOS")
+	}
+	path, err := daemon.EnsureConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+	_ = path
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	if ociContextBin == "" {
+		if p, lookErr := exec.LookPath("oci-context"); lookErr == nil {
+			ociContextBin = p
+		}
+	}
+	if ociContextBin == "" {
+		exe, exeErr := os.Executable()
+		if exeErr == nil {
+			ociContextBin = exe
+		}
+	}
+	if ociContextBin == "" {
+		return fmt.Errorf("could not resolve oci-context binary path; pass --oci-context-bin")
+	}
+	if wakeupScript == "" {
+		wakeupScript = filepath.Join(home, ".wakeup")
+	}
+	if hammerspoonDir == "" {
+		hammerspoonDir = filepath.Join(home, ".hammerspoon")
+	}
+
+	if err := os.MkdirAll(hammerspoonDir, 0o755); err != nil {
+		return err
+	}
+	modulePath := filepath.Join(hammerspoonDir, "oci_context.lua")
+	initPath := filepath.Join(hammerspoonDir, "init.lua")
+
+	if err := os.WriteFile(modulePath, []byte(renderHammerspoonModule()), 0o644); err != nil {
+		return err
+	}
+	if err := ensureHammerspoonInitLoadsModule(initPath); err != nil {
+		return err
+	}
+	if err := os.WriteFile(wakeupScript, []byte(renderWakeupScriptWithHammerspoon(ociContextBin, daemonLabel)), 0o755); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "Wrote Hammerspoon module: %s\n", modulePath)
+	fmt.Fprintf(out, "Updated Hammerspoon init: %s\n", initPath)
+	fmt.Fprintf(out, "Wrote wake script: %s\n", wakeupScript)
+
+	if reloadNow {
+		if b, err := exec.Command("open", "-a", "Hammerspoon").CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to launch Hammerspoon: %v: %s", err, strings.TrimSpace(string(b)))
+		}
+		if b, err := exec.Command("open", "-g", "hammerspoon://reloadConfig").CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to reload Hammerspoon config: %v: %s", err, strings.TrimSpace(string(b)))
+		}
+		fmt.Fprintln(out, "Hammerspoon launched and config reloaded.")
+	} else {
+		fmt.Fprintln(out, "Reload Hammerspoon config with: open -g 'hammerspoon://reloadConfig'")
+	}
+	return nil
 }
 
 func newNotifyCmd(use, short string) *cobra.Command {
@@ -736,73 +926,7 @@ func newDaemonSleepwatcherInstallCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Create wake hook script and launchd plist for sleepwatcher",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if runtime.GOOS != "darwin" {
-				return fmt.Errorf("sleepwatcher install is only supported on macOS")
-			}
-			path, err := daemon.EnsureConfig(cfgPath)
-			if err != nil {
-				return err
-			}
-			_ = path
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			if sleepwatcherBin == "" {
-				if p, lookErr := exec.LookPath("sleepwatcher"); lookErr == nil {
-					sleepwatcherBin = p
-				}
-			}
-			if sleepwatcherBin == "" {
-				return fmt.Errorf("sleepwatcher binary not found; install with `brew install sleepwatcher` or pass --sleepwatcher-bin")
-			}
-			if ociContextBin == "" {
-				if p, lookErr := exec.LookPath("oci-context"); lookErr == nil {
-					ociContextBin = p
-				}
-			}
-			if ociContextBin == "" {
-				exe, exeErr := os.Executable()
-				if exeErr == nil {
-					ociContextBin = exe
-				}
-			}
-			if ociContextBin == "" {
-				return fmt.Errorf("could not resolve oci-context binary path; pass --oci-context-bin")
-			}
-			if wakeupScript == "" {
-				wakeupScript = filepath.Join(home, ".wakeup")
-			}
-			if sleepwatcherPl == "" {
-				sleepwatcherPl = filepath.Join(home, "Library", "LaunchAgents", "com.adrianmross.oci-context.sleepwatcher.plist")
-			}
-
-			script := renderWakeupScript(ociContextBin, daemonLabel)
-			if err := os.WriteFile(wakeupScript, []byte(script), 0o755); err != nil {
-				return err
-			}
-			plist := renderSleepwatcherPlist("com.adrianmross.oci-context.sleepwatcher", sleepwatcherBin, wakeupScript)
-			if err := os.MkdirAll(filepath.Dir(sleepwatcherPl), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(sleepwatcherPl, []byte(plist), 0o644); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Wrote wake script: %s\n", wakeupScript)
-			fmt.Fprintf(cmd.OutOrStdout(), "Wrote launchd plist: %s\n", sleepwatcherPl)
-			if loadNow {
-				_ = exec.Command("launchctl", "unload", sleepwatcherPl).Run()
-				if out, err := exec.Command("launchctl", "load", sleepwatcherPl).CombinedOutput(); err != nil {
-					return fmt.Errorf("launchctl load failed: %v: %s", err, strings.TrimSpace(string(out)))
-				}
-				if out, err := exec.Command("launchctl", "start", "com.adrianmross.oci-context.sleepwatcher").CombinedOutput(); err != nil {
-					return fmt.Errorf("launchctl start failed: %v: %s", err, strings.TrimSpace(string(out)))
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), "Loaded and started sleepwatcher launch agent.")
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "Load with:\nlaunchctl unload %s 2>/dev/null || true\nlaunchctl load %s\nlaunchctl start com.adrianmross.oci-context.sleepwatcher\n", sleepwatcherPl, sleepwatcherPl)
-			}
-			return nil
+			return runDaemonSleepwatcherInstall(cmd.OutOrStdout(), cfgPath, daemonLabel, wakeupScript, sleepwatcherPl, sleepwatcherBin, ociContextBin, loadNow)
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
@@ -813,6 +937,76 @@ func newDaemonSleepwatcherInstallCmd() *cobra.Command {
 	cmd.Flags().StringVar(&ociContextBin, "oci-context-bin", "", "Absolute path to oci-context binary")
 	cmd.Flags().BoolVar(&loadNow, "load", true, "Load and start launchd agent after writing files")
 	return cmd
+}
+
+func runDaemonSleepwatcherInstall(out io.Writer, cfgPath, daemonLabel, wakeupScript, sleepwatcherPl, sleepwatcherBin, ociContextBin string, loadNow bool) error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("sleepwatcher install is only supported on macOS")
+	}
+	path, err := daemon.EnsureConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+	_ = path
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	if sleepwatcherBin == "" {
+		if p, lookErr := exec.LookPath("sleepwatcher"); lookErr == nil {
+			sleepwatcherBin = p
+		}
+	}
+	if sleepwatcherBin == "" {
+		return fmt.Errorf("sleepwatcher binary not found; install with `brew install sleepwatcher` or pass --sleepwatcher-bin")
+	}
+	if ociContextBin == "" {
+		if p, lookErr := exec.LookPath("oci-context"); lookErr == nil {
+			ociContextBin = p
+		}
+	}
+	if ociContextBin == "" {
+		exe, exeErr := os.Executable()
+		if exeErr == nil {
+			ociContextBin = exe
+		}
+	}
+	if ociContextBin == "" {
+		return fmt.Errorf("could not resolve oci-context binary path; pass --oci-context-bin")
+	}
+	if wakeupScript == "" {
+		wakeupScript = filepath.Join(home, ".wakeup")
+	}
+	if sleepwatcherPl == "" {
+		sleepwatcherPl = filepath.Join(home, "Library", "LaunchAgents", "com.adrianmross.oci-context.sleepwatcher.plist")
+	}
+
+	script := renderWakeupScript(ociContextBin, daemonLabel)
+	if err := os.WriteFile(wakeupScript, []byte(script), 0o755); err != nil {
+		return err
+	}
+	plist := renderSleepwatcherPlist("com.adrianmross.oci-context.sleepwatcher", sleepwatcherBin, wakeupScript)
+	if err := os.MkdirAll(filepath.Dir(sleepwatcherPl), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(sleepwatcherPl, []byte(plist), 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Wrote wake script: %s\n", wakeupScript)
+	fmt.Fprintf(out, "Wrote launchd plist: %s\n", sleepwatcherPl)
+	if loadNow {
+		_ = exec.Command("launchctl", "unload", sleepwatcherPl).Run()
+		if b, err := exec.Command("launchctl", "load", sleepwatcherPl).CombinedOutput(); err != nil {
+			return fmt.Errorf("launchctl load failed: %v: %s", err, strings.TrimSpace(string(b)))
+		}
+		if b, err := exec.Command("launchctl", "start", "com.adrianmross.oci-context.sleepwatcher").CombinedOutput(); err != nil {
+			return fmt.Errorf("launchctl start failed: %v: %s", err, strings.TrimSpace(string(b)))
+		}
+		fmt.Fprintln(out, "Loaded and started sleepwatcher launch agent.")
+	} else {
+		fmt.Fprintf(out, "Load with:\nlaunchctl unload %s 2>/dev/null || true\nlaunchctl load %s\nlaunchctl start com.adrianmross.oci-context.sleepwatcher\n", sleepwatcherPl, sleepwatcherPl)
+	}
+	return nil
 }
 
 func newDaemonLaunchdGenerateCmd() *cobra.Command {
@@ -991,6 +1185,33 @@ func renderLaunchdPlist(label, binaryPath, cfgPath string, autoRefresh bool, val
   </dict>
 </plist>
 `, xmlEscape(label), strings.Join(argXML, "\n"), xmlEscape(stdoutPath), xmlEscape(stderrPath))
+}
+
+func renderSystemdUserUnit(binaryPath, cfgPath string, autoRefresh bool, validateInterval, refreshInterval time.Duration) string {
+	args := []string{
+		shellQuote(binaryPath),
+		"daemon",
+		"serve",
+		"--config",
+		shellQuote(cfgPath),
+	}
+	if autoRefresh {
+		args = append(args, "--auto-refresh")
+	}
+	args = append(args, "--validate-interval", validateInterval.String(), "--refresh-interval", refreshInterval.String())
+	return fmt.Sprintf(`[Unit]
+Description=oci-context daemon
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%s
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+`, strings.Join(args, " "))
 }
 
 func renderWakeupScript(ociContextBin, daemonLabel string) string {
