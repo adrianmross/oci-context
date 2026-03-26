@@ -90,6 +90,7 @@ echo "Installed ${tool} to ${bin_dir}/${tool}"
 if [[ "${tool}" == "oci-context" ]]; then
   echo
   echo "Next steps:"
+  echo "  oci-context setup"
   echo "  oci-context daemon install"
   echo "  oci-context daemon doctor"
   echo

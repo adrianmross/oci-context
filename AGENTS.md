@@ -44,6 +44,12 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 - After reinstalling/upgrading the binary, restart the launchd job so the daemon does not keep serving stale code:
   - `launchctl kickstart -k gui/$(id -u)/<launchd-label>`
 - Linux: use `oci-context daemon install systemd` (or a manual `systemd --user` service).
+- Use `--verbose` on daemon setup/diagnostic commands to print underlying system commands.
+
+## Bootstrap
+- Top-level bootstrap command:
+  - `oci-context setup`
+- Includes config bootstrap and can run daemon + auth setup in one flow.
 - Prefer a packaged/static binary path for service definitions rather than `go run`.
 
 ## Documentation Expectations

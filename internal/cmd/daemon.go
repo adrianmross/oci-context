@@ -21,11 +21,14 @@ import (
 
 const daemonLaunchdDefaultLabel = "com.adrianmross.oci-context.daemon"
 
+var daemonVerbose bool
+
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Manage the oci-context daemon",
 	}
+	cmd.PersistentFlags().BoolVarP(&daemonVerbose, "verbose", "v", false, "Print underlying system commands as they run")
 	cmd.AddCommand(newDaemonInstallCmd())
 	cmd.AddCommand(newDaemonRecoverCmd())
 	cmd.AddCommand(newDaemonDoctorCmd())
@@ -55,9 +58,9 @@ func newDaemonRecoverCmd() *cobra.Command {
 				return fmt.Errorf("daemon recover is only supported on macOS")
 			}
 			target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
-			if out, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
-				return fmt.Errorf("launchctl kickstart failed: %v: %s (run `oci-context daemon install` to reinstall/reload service)", err, strings.TrimSpace(string(out)))
-			}
+				if out, err := runCombinedOutput(cmd.OutOrStdout(), "launchctl", "kickstart", "-k", target); err != nil {
+					return fmt.Errorf("launchctl kickstart failed: %v: %s (run `oci-context daemon install` to reinstall/reload service)", err, strings.TrimSpace(string(out)))
+				}
 
 			cfg, _, err := loadDaemonConfig(cfgPath)
 			if err != nil {
@@ -125,7 +128,7 @@ func newDaemonDoctorCmd() *cobra.Command {
 
 			if runtime.GOOS == "darwin" {
 				target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
-				if out, err := exec.Command("launchctl", "print", target).CombinedOutput(); err != nil {
+					if out, err := runCombinedOutput(cmd.OutOrStdout(), "launchctl", "print", target); err != nil {
 					issues++
 					fmt.Fprintf(cmd.OutOrStdout(), "launchd: unhealthy (%v)\n", err)
 					trimmed := strings.TrimSpace(string(out))
@@ -203,58 +206,7 @@ func newDaemonInstallCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Install daemon integrations for your OS",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			switch runtime.GOOS {
-			case "darwin":
-				if err := runDaemonLaunchdInstall(
-					cmd.OutOrStdout(),
-					"",
-					daemonLaunchdDefaultLabel,
-					"",
-					"",
-					"",
-					"",
-					true,
-					5*time.Minute,
-					15*time.Minute,
-					true,
-					true,
-				); err != nil {
-					return err
-				}
-				if err := runDaemonHammerspoonInstall(
-					cmd.OutOrStdout(),
-					"",
-					daemonLaunchdDefaultLabel,
-					"",
-					"",
-					"",
-					false,
-				); err != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "warning: hammerspoon install skipped/failed: %v\n", err)
-				}
-				if _, lookErr := exec.LookPath("sleepwatcher"); lookErr == nil {
-					if err := runDaemonSleepwatcherInstall(
-						cmd.OutOrStdout(),
-						"",
-						daemonLaunchdDefaultLabel,
-						"",
-						"",
-						"",
-						"",
-						true,
-					); err != nil {
-						fmt.Fprintf(cmd.OutOrStdout(), "warning: sleepwatcher install failed: %v\n", err)
-					}
-				} else {
-					fmt.Fprintln(cmd.OutOrStdout(), "sleepwatcher not found; skipping. Install with `brew install sleepwatcher` then run `oci-context daemon install sleepwatcher`.")
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), "Install complete. Use `oci-context daemon up` after wake/resume.")
-				return nil
-			case "linux":
-				return fmt.Errorf("on Linux use `oci-context daemon install systemd`")
-			default:
-				return fmt.Errorf("daemon install is not supported on %s", runtime.GOOS)
-			}
+			return runDaemonInstallDefault(cmd.OutOrStdout(), "")
 		},
 	}
 	cmd.AddCommand(newDaemonInstallLaunchdCmd())
@@ -262,6 +214,61 @@ func newDaemonInstallCmd() *cobra.Command {
 	cmd.AddCommand(newDaemonInstallHammerspoonCmd())
 	cmd.AddCommand(newDaemonInstallSystemdCmd())
 	return cmd
+}
+
+func runDaemonInstallDefault(out io.Writer, cfgPath string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		if err := runDaemonLaunchdInstall(
+			out,
+			cfgPath,
+			daemonLaunchdDefaultLabel,
+			"",
+			"",
+			"",
+			"",
+			true,
+			5*time.Minute,
+			15*time.Minute,
+			true,
+			true,
+		); err != nil {
+			return err
+		}
+		if err := runDaemonHammerspoonInstall(
+			out,
+			cfgPath,
+			daemonLaunchdDefaultLabel,
+			"",
+			"",
+			"",
+			false,
+		); err != nil {
+			fmt.Fprintf(out, "warning: hammerspoon install skipped/failed: %v\n", err)
+		}
+		if _, lookErr := exec.LookPath("sleepwatcher"); lookErr == nil {
+			if err := runDaemonSleepwatcherInstall(
+				out,
+				cfgPath,
+				daemonLaunchdDefaultLabel,
+				"",
+				"",
+				"",
+				"",
+				true,
+			); err != nil {
+				fmt.Fprintf(out, "warning: sleepwatcher install failed: %v\n", err)
+			}
+		} else {
+			fmt.Fprintln(out, "sleepwatcher not found; skipping. Install with `brew install sleepwatcher` then run `oci-context daemon install sleepwatcher`.")
+		}
+		fmt.Fprintln(out, "Install complete. Use `oci-context daemon up` after wake/resume.")
+		return nil
+	case "linux":
+		return fmt.Errorf("on Linux use `oci-context daemon install systemd`")
+	default:
+		return fmt.Errorf("daemon install is not supported on %s", runtime.GOOS)
+	}
 }
 
 func newDaemonInstallLaunchdCmd() *cobra.Command {
@@ -327,17 +334,17 @@ func runDaemonLaunchdInstall(out io.Writer, cfgPath, label, binaryPath, outPath,
 		return nil
 	}
 
-	_ = exec.Command("launchctl", "unload", outPath).Run()
-	if b, err := exec.Command("launchctl", "load", outPath).CombinedOutput(); err != nil {
+	_ = runCommand(out, "launchctl", "unload", outPath)
+	if b, err := runCombinedOutput(out, "launchctl", "load", outPath); err != nil {
 		return fmt.Errorf("launchctl load failed: %v: %s", err, strings.TrimSpace(string(b)))
 	}
-	if b, err := exec.Command("launchctl", "start", label).CombinedOutput(); err != nil {
+	if b, err := runCombinedOutput(out, "launchctl", "start", label); err != nil {
 		return fmt.Errorf("launchctl start failed: %v: %s", err, strings.TrimSpace(string(b)))
 	}
 
 	if kickstart {
 		target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
-		if b, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
+		if b, err := runCombinedOutput(out, "launchctl", "kickstart", "-k", target); err != nil {
 			return fmt.Errorf("launchctl kickstart failed: %v: %s", err, strings.TrimSpace(string(b)))
 		}
 		fmt.Fprintf(out, "Loaded and restarted launchd job: %s\n", target)
@@ -450,10 +457,10 @@ func newDaemonInstallSystemdCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "Load with:\nsystemctl --user daemon-reload\nsystemctl --user enable --now oci-context-daemon.service")
 				return nil
 			}
-			if b, err := exec.Command("systemctl", "--user", "daemon-reload").CombinedOutput(); err != nil {
+			if b, err := runCombinedOutput(cmd.OutOrStdout(), "systemctl", "--user", "daemon-reload"); err != nil {
 				return fmt.Errorf("systemctl daemon-reload failed: %v: %s", err, strings.TrimSpace(string(b)))
 			}
-			if b, err := exec.Command("systemctl", "--user", "enable", "--now", "oci-context-daemon.service").CombinedOutput(); err != nil {
+			if b, err := runCombinedOutput(cmd.OutOrStdout(), "systemctl", "--user", "enable", "--now", "oci-context-daemon.service"); err != nil {
 				return fmt.Errorf("systemctl enable --now failed: %v: %s", err, strings.TrimSpace(string(b)))
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "Enabled and started systemd user service: oci-context-daemon.service")
@@ -814,10 +821,10 @@ func runDaemonHammerspoonInstall(out io.Writer, cfgPath, daemonLabel, wakeupScri
 	fmt.Fprintf(out, "Wrote wake script: %s\n", wakeupScript)
 
 	if reloadNow {
-		if b, err := exec.Command("open", "-a", "Hammerspoon").CombinedOutput(); err != nil {
+		if b, err := runCombinedOutput(out, "open", "-a", "Hammerspoon"); err != nil {
 			return fmt.Errorf("failed to launch Hammerspoon: %v: %s", err, strings.TrimSpace(string(b)))
 		}
-		if b, err := exec.Command("open", "-g", "hammerspoon://reloadConfig").CombinedOutput(); err != nil {
+		if b, err := runCombinedOutput(out, "open", "-g", "hammerspoon://reloadConfig"); err != nil {
 			return fmt.Errorf("failed to reload Hammerspoon config: %v: %s", err, strings.TrimSpace(string(b)))
 		}
 		fmt.Fprintln(out, "Hammerspoon launched and config reloaded.")
@@ -884,7 +891,7 @@ func newNotifyCmd(use, short string) *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), eventURL)
 				return nil
 			}
-			if out, err := exec.Command("open", "-g", eventURL).CombinedOutput(); err != nil {
+			if out, err := runCombinedOutput(cmd.OutOrStdout(), "open", "-g", eventURL); err != nil {
 				return fmt.Errorf("failed to trigger hammerspoon event: %v: %s", err, strings.TrimSpace(string(out)))
 			}
 			if nativeNotify {
@@ -995,11 +1002,11 @@ func runDaemonSleepwatcherInstall(out io.Writer, cfgPath, daemonLabel, wakeupScr
 	fmt.Fprintf(out, "Wrote wake script: %s\n", wakeupScript)
 	fmt.Fprintf(out, "Wrote launchd plist: %s\n", sleepwatcherPl)
 	if loadNow {
-		_ = exec.Command("launchctl", "unload", sleepwatcherPl).Run()
-		if b, err := exec.Command("launchctl", "load", sleepwatcherPl).CombinedOutput(); err != nil {
+		_ = runCommand(out, "launchctl", "unload", sleepwatcherPl)
+		if b, err := runCombinedOutput(out, "launchctl", "load", sleepwatcherPl); err != nil {
 			return fmt.Errorf("launchctl load failed: %v: %s", err, strings.TrimSpace(string(b)))
 		}
-		if b, err := exec.Command("launchctl", "start", "com.adrianmross.oci-context.sleepwatcher").CombinedOutput(); err != nil {
+		if b, err := runCombinedOutput(out, "launchctl", "start", "com.adrianmross.oci-context.sleepwatcher"); err != nil {
 			return fmt.Errorf("launchctl start failed: %v: %s", err, strings.TrimSpace(string(b)))
 		}
 		fmt.Fprintln(out, "Loaded and started sleepwatcher launch agent.")
@@ -1347,4 +1354,26 @@ func xmlEscape(s string) string {
 		"'", "&apos;",
 	)
 	return repl.Replace(s)
+}
+
+func runCommand(out io.Writer, name string, args ...string) error {
+	if daemonVerbose {
+		fmt.Fprintf(out, "+ %s", name)
+		for _, a := range args {
+			fmt.Fprintf(out, " %s", shellQuote(a))
+		}
+		fmt.Fprintln(out)
+	}
+	return exec.Command(name, args...).Run()
+}
+
+func runCombinedOutput(out io.Writer, name string, args ...string) ([]byte, error) {
+	if daemonVerbose {
+		fmt.Fprintf(out, "+ %s", name)
+		for _, a := range args {
+			fmt.Fprintf(out, " %s", shellQuote(a))
+		}
+		fmt.Fprintln(out)
+	}
+	return exec.Command(name, args...).CombinedOutput()
 }

@@ -102,6 +102,7 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 - `oci-context status`
 - `oci-context export --format env|json`
 - `oci-context auth methods|show|set|set-user|login|refresh|validate|setup|notify`
+- `oci-context setup` (bootstrap config + daemon + auth for current context)
 - `oci-context daemon serve [--auto-refresh --validate-interval 5m --refresh-interval 15m]`
 - `oci-context daemon install` (installer entrypoint; use subcommands for specific targets)
 - `oci-context daemon up` (one-command restart + nudge after return/wake)
@@ -229,6 +230,14 @@ One-shot install/reload (recommended):
 oci-context daemon install
 ```
 
+Verbose mode for setup/doctor/up/install commands:
+
+```sh
+oci-context daemon install --verbose
+oci-context daemon doctor --verbose
+oci-context daemon up --verbose
+```
+
 This writes the launchd plist, (re)loads it, and kickstarts the job so the running daemon uses the current binary.
 
 Quick recovery when you return to your computer:
@@ -318,6 +327,19 @@ One-shot install for a user service:
 ```sh
 oci-context daemon install systemd
 ```
+
+### Top-level Bootstrap
+Run project/global config bootstrap, daemon setup, and auth setup in one command:
+
+```sh
+oci-context setup
+```
+
+Useful options:
+- `--no-daemon` skip daemon setup
+- `--no-auth` skip auth setup
+- `--context <name>` choose auth setup context
+- `--verbose` print underlying system commands
 
 or generate manually:
 
