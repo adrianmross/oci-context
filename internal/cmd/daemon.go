@@ -66,7 +66,7 @@ func newDaemonRecoverCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			conn, err := dialDaemonSocketWithRetry(cfg.Options.SocketPath, 5*time.Second)
+			conn, err := dialDaemonSocketWithRetry(cmd.OutOrStdout(), cfg.Options.SocketPath, 5*time.Second)
 			if err != nil {
 				return fmt.Errorf("daemon restarted but socket dial failed: %w", err)
 			}
@@ -1074,9 +1074,10 @@ func loadDaemonConfig(cfgPath string) (config.Config, string, error) {
 	return cfg, path, nil
 }
 
-func dialDaemonSocketWithRetry(socketPath string, timeout time.Duration) (*ipcmsg.Conn, error) {
+func dialDaemonSocketWithRetry(out io.Writer, socketPath string, timeout time.Duration) (*ipcmsg.Conn, error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
+	waitingPrinted := false
 	for {
 		conn, err := ipcmsg.Dial(socketPath)
 		if err == nil {
@@ -1085,6 +1086,10 @@ func dialDaemonSocketWithRetry(socketPath string, timeout time.Duration) (*ipcms
 		lastErr = err
 		if time.Now().After(deadline) {
 			break
+		}
+		if daemonVerbose && !waitingPrinted {
+			fmt.Fprintf(out, "waiting for daemon socket: %s\n", socketPath)
+			waitingPrinted = true
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
