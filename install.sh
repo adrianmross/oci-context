@@ -14,6 +14,31 @@ require_cmd() {
   fi
 }
 
+github_api_get() {
+  local path="$1"
+  local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+  if [[ -n "${token}" ]]; then
+    curl -fsSL --retry 3 --retry-all-errors \
+      -H "Accept: application/vnd.github+json" \
+      -H "Authorization: Bearer ${token}" \
+      "https://api.github.com/repos/${repo}${path}"
+  else
+    curl -fsSL --retry 3 --retry-all-errors \
+      -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${repo}${path}"
+  fi
+}
+
+resolve_latest_stable() {
+  local redirected
+  redirected=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${repo}/releases/latest" || true)
+  if [[ -n "${redirected}" ]]; then
+    basename "${redirected}"
+    return 0
+  fi
+  github_api_get "/releases/latest" | jq -r '.tag_name // empty'
+}
+
 for cmd in curl jq tar install grep awk uname mktemp; do
   require_cmd "$cmd"
 done
@@ -27,14 +52,15 @@ case "${tool}" in
 esac
 
 if [[ "${version}" == "latest" ]]; then
-  version=$(curl -sSL --retry 3 --retry-all-errors "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.tag_name // empty')
+  version=$(resolve_latest_stable)
 elif [[ "${version}" == "pre" || "${version}" == "prerelease" ]]; then
-  version=$(curl -sSL --retry 3 --retry-all-errors "https://api.github.com/repos/${repo}/releases" | jq -r '[.[] | select(.prerelease)] | sort_by(.published_at) | reverse | .[0].tag_name // empty')
+  version=$(github_api_get "/releases" | jq -r '[.[] | select(.prerelease)] | sort_by(.published_at) | reverse | .[0].tag_name // empty')
 fi
 
 if [[ -z "${version}" || "${version}" == "null" ]]; then
   echo "Unable to determine release version." >&2
-  echo "No stable release may exist yet. Publish a GitHub release first, or set VERSION=<tag>, or use VERSION=prerelease." >&2
+  echo "No suitable release may exist, or GitHub API rate limits were hit." >&2
+  echo "Try setting GITHUB_TOKEN (or GH_TOKEN), or set VERSION=<tag>, or use VERSION=prerelease." >&2
   exit 1
 fi
 
