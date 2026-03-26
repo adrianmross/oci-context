@@ -102,7 +102,7 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 - `oci-context status`
 - `oci-context export --format env|json`
 - `oci-context auth methods|show|set|set-user|login|refresh|validate|setup|notify`
-- `oci-context setup` (bootstrap config + daemon + auth for current context)
+- `oci-context setup` (bootstrap config + daemon; auth optional with `--with-auth`)
 - `oci-context daemon serve [--auto-refresh --validate-interval 5m --refresh-interval 15m]`
 - `oci-context daemon install` (installer entrypoint; use subcommands for specific targets)
 - `oci-context daemon up` (one-command restart + nudge after return/wake)
@@ -329,7 +329,7 @@ oci-context daemon install systemd
 ```
 
 ### Top-level Bootstrap
-Run project/global config bootstrap, daemon setup, and auth setup in one command:
+Run project/global config bootstrap and daemon setup in one command:
 
 ```sh
 oci-context setup
@@ -337,7 +337,7 @@ oci-context setup
 
 Useful options:
 - `--no-daemon` skip daemon setup
-- `--no-auth` skip auth setup
+- `--with-auth` also run auth setup for selected context
 - `--context <name>` choose auth setup context
 - `--verbose` print underlying system commands
 

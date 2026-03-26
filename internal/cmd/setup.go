@@ -13,12 +13,12 @@ func newSetupCmd() *cobra.Command {
 	var useGlobal bool
 	var contextName string
 	var noDaemon bool
-	var noAuth bool
+	var withAuth bool
 	var verbose bool
 
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Bootstrap oci-context (config + daemon + auth)",
+		Short: "Bootstrap oci-context (config + daemon)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			daemonVerbose = verbose
 			path, err := resolveConfigPath(cfgPath, useGlobal)
@@ -39,12 +39,12 @@ func newSetupCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "Skipping daemon setup (--no-daemon).")
 			}
 
-			if !noAuth {
+			if withAuth {
 				if err := runSetupAuth(cmd, path, contextName); err != nil {
 					return err
 				}
 			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "Skipping auth setup (--no-auth).")
+				fmt.Fprintln(cmd.OutOrStdout(), "Skipping auth setup (use --with-auth to enable).")
 			}
 			return nil
 		},
@@ -53,7 +53,7 @@ func newSetupCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
 	cmd.Flags().StringVar(&contextName, "context", "", "Target context for auth setup (default current)")
 	cmd.Flags().BoolVar(&noDaemon, "no-daemon", false, "Skip daemon setup")
-	cmd.Flags().BoolVar(&noAuth, "no-auth", false, "Skip auth setup")
+	cmd.Flags().BoolVar(&withAuth, "with-auth", false, "Also run auth setup for current/selected context")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print underlying system commands as they run")
 	return cmd
 }

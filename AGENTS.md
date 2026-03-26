@@ -49,7 +49,7 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 ## Bootstrap
 - Top-level bootstrap command:
   - `oci-context setup`
-- Includes config bootstrap and can run daemon + auth setup in one flow.
+- Includes config + daemon bootstrap by default; auth setup is opt-in via `--with-auth`.
 - Prefer a packaged/static binary path for service definitions rather than `go run`.
 
 ## Documentation Expectations
