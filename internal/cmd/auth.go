@@ -357,7 +357,7 @@ func newAuthCmd() *cobra.Command {
 			case config.AuthMethodSecurityToken:
 				return runOCI(cmd, []string{"session", "authenticate", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath, "--region", ctx.Region})
 			case config.AuthMethodAPIKey:
-				return runOCI(cmd, []string{"setup", "config", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
+				return runOCI(cmd, []string{"setup", "config", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
 			case config.AuthMethodInstancePrincipal:
 				return runOCI(cmd, []string{"setup", "instance-principal"})
 			default:
@@ -435,8 +435,8 @@ func newAuthCmd() *cobra.Command {
 			}
 			method := config.NormalizeAuthMethod(ctx.AuthMethod)
 			switch method {
-			case config.AuthMethodAPIKey, config.AuthMethodSecurityToken:
-				return runOCI(cmd, []string{"setup", "config", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
+				case config.AuthMethodAPIKey, config.AuthMethodSecurityToken:
+					return runOCI(cmd, []string{"setup", "config", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
 			case config.AuthMethodInstancePrincipal:
 				return runOCI(cmd, []string{"setup", "instance-principal"})
 			default:

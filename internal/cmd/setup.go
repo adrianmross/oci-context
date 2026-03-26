@@ -78,7 +78,7 @@ func runSetupAuth(cmd *cobra.Command, cfgPath, contextName string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "Running auth setup for context=%s method=%s\n", ctx.Name, method)
 	switch method {
 	case config.AuthMethodAPIKey, config.AuthMethodSecurityToken:
-		return runOCI(cmd, []string{"setup", "config", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
+		return runOCI(cmd, []string{"setup", "config", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
 	case config.AuthMethodInstancePrincipal:
 		return runOCI(cmd, []string{"setup", "instance-principal"})
 	default:
