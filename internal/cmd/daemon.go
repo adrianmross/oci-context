@@ -404,7 +404,8 @@ func newNotifyCmd(use, short string) *cobra.Command {
 			ctxName := strings.TrimSpace(contextName)
 			prof := strings.TrimSpace(profile)
 			reg := strings.TrimSpace(region)
-			if ctxName == "" || prof == "" || reg == "" {
+			tenancy := strings.TrimSpace(tenancyName)
+			if ctxName == "" || prof == "" || reg == "" || tenancy == "" {
 				cfg, _, err := loadDaemonConfig(cfgPath)
 				if err != nil {
 					return err
@@ -423,6 +424,9 @@ func newNotifyCmd(use, short string) *cobra.Command {
 					if reg == "" {
 						reg = ctx.Region
 					}
+					if tenancy == "" {
+						tenancy = strings.TrimSpace(ctx.TenancyOCID)
+					}
 				}
 			}
 			if ctxName == "" {
@@ -431,7 +435,7 @@ func newNotifyCmd(use, short string) *cobra.Command {
 			if prof == "" {
 				prof = "DEFAULT"
 			}
-			eventURL := buildHammerspoonAuthNeededURL(prof, ctxName, reg, reason, tenancyName)
+			eventURL := buildHammerspoonAuthNeededURL(prof, ctxName, reg, reason, tenancy)
 			if printOnlyURL {
 				fmt.Fprintln(cmd.OutOrStdout(), eventURL)
 				return nil
@@ -457,7 +461,8 @@ func newNotifyCmd(use, short string) *cobra.Command {
 	cmd.Flags().StringVar(&reason, "reason", "manual", "Reason text shown in notification")
 	cmd.Flags().StringVar(&profile, "profile", "", "Override profile passed to Hammerspoon event")
 	cmd.Flags().StringVar(&region, "region", "", "Override region passed to Hammerspoon event")
-	cmd.Flags().StringVar(&tenancyName, "tenancy-name", "", "Optional tenancy name passed to session authenticate")
+	cmd.Flags().StringVar(&tenancyName, "tenancy-name", "", "Optional tenancy override passed to session authenticate (default: selected context tenancy_ocid)")
+	cmd.Flags().StringVar(&tenancyName, "tenancy", "", "Alias for --tenancy-name")
 	cmd.Flags().BoolVar(&nativeNotify, "native-notify", false, "Also send a native macOS notification (terminal-notifier when available, otherwise osascript)")
 	cmd.Flags().BoolVar(&printOnlyURL, "print-url", false, "Print event URL instead of opening it")
 	return cmd

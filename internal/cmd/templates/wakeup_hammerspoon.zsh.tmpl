@@ -24,7 +24,7 @@ notify_actionable() {
 
   local hint="Run: oci session authenticate"
   if [ -n "${profile}" ]; then
-    hint="Run: oci session authenticate --profile ${profile}"
+    hint="Run: oci session authenticate --profile-name ${profile}"
   fi
   local msg="Auth unhealthy for ${context_name:-current}. ${hint}"
   if [ -n "${reason}" ]; then
