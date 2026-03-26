@@ -18,6 +18,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const daemonLaunchdDefaultLabel = "com.adrianmross.oci-context.daemon"
+
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -43,6 +45,9 @@ func newDaemonRecoverCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "recover",
 		Short: "Restart launchd daemon and trigger immediate auth maintenance (macOS)",
+		Aliases: []string{
+			"fix",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if runtime.GOOS != "darwin" {
 				return fmt.Errorf("daemon recover is only supported on macOS")
@@ -86,7 +91,7 @@ func newDaemonRecoverCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
-	cmd.Flags().StringVar(&label, "label", "com.adrianmross.oci-context.daemon", "launchd label")
+	cmd.Flags().StringVar(&label, "label", daemonLaunchdDefaultLabel, "launchd label")
 	cmd.Flags().StringVar(&contextName, "context", "", "Target context name for nudge (default monitored list)")
 	return cmd
 }
@@ -98,6 +103,9 @@ func newDaemonDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Diagnose daemon health and suggest remediation steps",
+		Aliases: []string{
+			"check",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			issues := 0
 			cfg, path, err := loadDaemonConfig(cfgPath)
@@ -183,7 +191,7 @@ func newDaemonDoctorCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
-	cmd.Flags().StringVar(&label, "label", "com.adrianmross.oci-context.daemon", "launchd label")
+	cmd.Flags().StringVar(&label, "label", daemonLaunchdDefaultLabel, "launchd label")
 	cmd.Flags().StringVar(&contextName, "context", "", "Target context name (default current)")
 	return cmd
 }
@@ -204,41 +212,18 @@ func newDaemonInstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install/refresh launchd daemon service and restart it",
+		Aliases: []string{
+			"setup",
+			"up",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if runtime.GOOS != "darwin" {
 				return fmt.Errorf("daemon install is only supported on macOS")
 			}
 
-			path, err := daemon.EnsureConfig(cfgPath)
+			path, binaryPath, outPath, stdoutPath, stderrPath, err := resolveLaunchdPaths(cfgPath, label, binaryPath, outPath, stdoutPath, stderrPath)
 			if err != nil {
 				return err
-			}
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			if binaryPath == "" {
-				if bin, lookErr := exec.LookPath("oci-context"); lookErr == nil {
-					binaryPath = bin
-				}
-			}
-			if binaryPath == "" {
-				exe, exeErr := os.Executable()
-				if exeErr == nil {
-					binaryPath = exe
-				}
-			}
-			if binaryPath == "" {
-				return fmt.Errorf("could not resolve oci-context binary path; pass --binary")
-			}
-			if stdoutPath == "" {
-				stdoutPath = filepath.Join(home, ".oci-context", "daemon.out.log")
-			}
-			if stderrPath == "" {
-				stderrPath = filepath.Join(home, ".oci-context", "daemon.err.log")
-			}
-			if outPath == "" {
-				outPath = filepath.Join(home, "Library", "LaunchAgents", label+".plist")
 			}
 
 			plist := renderLaunchdPlist(label, binaryPath, path, autoRefresh, validateInterval, refreshInterval, stdoutPath, stderrPath)
@@ -289,7 +274,7 @@ func newDaemonInstallCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
-	cmd.Flags().StringVar(&label, "label", "com.adrianmross.oci-context.daemon", "launchd label")
+	cmd.Flags().StringVar(&label, "label", daemonLaunchdDefaultLabel, "launchd label")
 	cmd.Flags().StringVar(&binaryPath, "binary", "", "Absolute path to oci-context binary")
 	cmd.Flags().StringVar(&outPath, "out", "", "Output plist path (default ~/Library/LaunchAgents/<label>.plist)")
 	cmd.Flags().StringVar(&stdoutPath, "stdout-log", "", "stdout log path")
@@ -644,7 +629,7 @@ func newDaemonHammerspoonInstallCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
-	cmd.Flags().StringVar(&daemonLabel, "daemon-label", "com.adrianmross.oci-context.daemon", "launchd label for oci-context daemon")
+	cmd.Flags().StringVar(&daemonLabel, "daemon-label", daemonLaunchdDefaultLabel, "launchd label for oci-context daemon")
 	cmd.Flags().StringVar(&wakeupScript, "wakeup-script", "", "Path to write wake hook script (default ~/.wakeup)")
 	cmd.Flags().StringVar(&hammerspoonDir, "hammerspoon-dir", "", "Path to Hammerspoon config directory (default ~/.hammerspoon)")
 	cmd.Flags().StringVar(&ociContextBin, "oci-context-bin", "", "Absolute path to oci-context binary")
@@ -821,7 +806,7 @@ func newDaemonSleepwatcherInstallCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
-	cmd.Flags().StringVar(&daemonLabel, "daemon-label", "com.adrianmross.oci-context.daemon", "launchd label for oci-context daemon")
+	cmd.Flags().StringVar(&daemonLabel, "daemon-label", daemonLaunchdDefaultLabel, "launchd label for oci-context daemon")
 	cmd.Flags().StringVar(&wakeupScript, "wakeup-script", "", "Path to write wake hook script (default ~/.wakeup)")
 	cmd.Flags().StringVar(&sleepwatcherPl, "plist", "", "Path to write sleepwatcher launchd plist")
 	cmd.Flags().StringVar(&sleepwatcherBin, "sleepwatcher-bin", "", "Absolute path to sleepwatcher binary")
@@ -848,36 +833,9 @@ func newDaemonLaunchdGenerateCmd() *cobra.Command {
 			if runtime.GOOS != "darwin" {
 				return fmt.Errorf("launchd generation is only supported on macOS")
 			}
-			path, err := daemon.EnsureConfig(cfgPath)
+			path, binaryPath, outPath, stdoutPath, stderrPath, err := resolveLaunchdPaths(cfgPath, label, binaryPath, outPath, stdoutPath, stderrPath)
 			if err != nil {
 				return err
-			}
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			if binaryPath == "" {
-				if bin, lookErr := exec.LookPath("oci-context"); lookErr == nil {
-					binaryPath = bin
-				}
-			}
-			if binaryPath == "" {
-				exe, exeErr := os.Executable()
-				if exeErr == nil {
-					binaryPath = exe
-				}
-			}
-			if binaryPath == "" {
-				return fmt.Errorf("could not resolve oci-context binary path; pass --binary")
-			}
-			if stdoutPath == "" {
-				stdoutPath = filepath.Join(home, ".oci-context", "daemon.out.log")
-			}
-			if stderrPath == "" {
-				stderrPath = filepath.Join(home, ".oci-context", "daemon.err.log")
-			}
-			if outPath == "" {
-				outPath = filepath.Join(home, "Library", "LaunchAgents", label+".plist")
 			}
 			plist := renderLaunchdPlist(label, binaryPath, path, autoRefresh, validateInterval, refreshInterval, stdoutPath, stderrPath)
 			if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
@@ -892,7 +850,7 @@ func newDaemonLaunchdGenerateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
-	cmd.Flags().StringVar(&label, "label", "com.adrianmross.oci-context.daemon", "launchd label")
+	cmd.Flags().StringVar(&label, "label", daemonLaunchdDefaultLabel, "launchd label")
 	cmd.Flags().StringVar(&binaryPath, "binary", "", "Absolute path to oci-context binary")
 	cmd.Flags().StringVar(&outPath, "out", "", "Output plist path (default ~/Library/LaunchAgents/<label>.plist)")
 	cmd.Flags().StringVar(&stdoutPath, "stdout-log", "", "stdout log path")
@@ -913,6 +871,41 @@ func loadDaemonConfig(cfgPath string) (config.Config, string, error) {
 		return config.Config{}, "", err
 	}
 	return cfg, path, nil
+}
+
+func resolveLaunchdPaths(cfgPath, label, binaryPath, outPath, stdoutPath, stderrPath string) (string, string, string, string, string, error) {
+	path, err := daemon.EnsureConfig(cfgPath)
+	if err != nil {
+		return "", "", "", "", "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", "", "", "", err
+	}
+	if binaryPath == "" {
+		if bin, lookErr := exec.LookPath("oci-context"); lookErr == nil {
+			binaryPath = bin
+		}
+	}
+	if binaryPath == "" {
+		exe, exeErr := os.Executable()
+		if exeErr == nil {
+			binaryPath = exe
+		}
+	}
+	if binaryPath == "" {
+		return "", "", "", "", "", fmt.Errorf("could not resolve oci-context binary path; pass --binary")
+	}
+	if stdoutPath == "" {
+		stdoutPath = filepath.Join(home, ".oci-context", "daemon.out.log")
+	}
+	if stderrPath == "" {
+		stderrPath = filepath.Join(home, ".oci-context", "daemon.err.log")
+	}
+	if outPath == "" {
+		outPath = filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+	}
+	return path, binaryPath, outPath, stdoutPath, stderrPath, nil
 }
 
 func newDaemonNudgeCmd() *cobra.Command {

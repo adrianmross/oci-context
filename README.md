@@ -228,7 +228,7 @@ oci-context auth show --context dev
 One-shot install/reload (recommended):
 
 ```sh
-oci-context daemon install --auto-refresh
+oci-context daemon install
 ```
 
 This writes the launchd plist, (re)loads it, and kickstarts the job so the running daemon uses the current binary.
@@ -246,6 +246,11 @@ Run diagnostics:
 ```sh
 oci-context daemon doctor
 ```
+
+Short aliases:
+- `oci-context daemon up` == `oci-context daemon install`
+- `oci-context daemon fix` == `oci-context daemon recover`
+- `oci-context daemon check` == `oci-context daemon doctor`
 
 Generate a plist:
 
