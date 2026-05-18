@@ -29,6 +29,19 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 - If using `security_token`, ensure the target OCI profile has valid token/session material.
 - If refresh fails persistently, re-authenticate (`oci session authenticate ...`).
 
+## Agent Contract
+- Use JSON output for automation wherever the CLI supports it, including
+  `oci-context status -o json`, `oci-context export --format json`,
+  `oci-context auth ensure --output json`, and
+  `oci-context auth show --output json`.
+- Treat JSON field names as stable contract. Prefer additive fields and document
+  any breaking output change before relying on it in workflows or scripts.
+- Preferred validation commands are `make fmt`, `make vet`, `make test`,
+  `make lint-workflows`, and `make validate-workflows`.
+- Release behavior is tag-driven: `v*` tags publish through GoReleaser, and the
+  `auto-release` workflow can create semantic tags from Conventional Commit
+  subjects on `main` while skipping commits that modify workflows.
+
 ## Background Service
 - macOS: install/reload launchd daemon in one step:
   - `oci-context daemon install`
