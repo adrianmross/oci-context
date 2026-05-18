@@ -21,6 +21,7 @@ func newStatusCmd() *cobra.Command {
 	var cfgPath string
 	var output string
 	var plain bool
+	var noLookup bool
 
 	cmd := &cobra.Command{
 		Use:   "status",
@@ -45,23 +46,32 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctxTimeout, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
-			defer cancel()
-			details, err := fetchIdentity(ctxTimeout, cfg.Options.OCIConfigPath, ctx.Profile, ctx.Region, ctx.TenancyOCID, ctx.CompartmentOCID, ctx.User)
-			if err != nil {
-				return err
-			}
 			resp := map[string]string{
 				"context":        ctx.Name,
 				"profile":        ctx.Profile,
 				"auth_method":    config.NormalizeAuthMethod(ctx.AuthMethod),
-				"tenancy":        details.TenancyName,
-				"tenancy_id":     details.TenancyOCID,
-				"compartment":    details.CompartmentName,
-				"compartment_id": details.CompartmentOCID,
-				"user":           details.UserName,
-				"user_id":        details.UserOCID,
-				"region":         details.Region,
+				"tenancy":        "",
+				"tenancy_id":     ctx.TenancyOCID,
+				"compartment":    "",
+				"compartment_id": ctx.CompartmentOCID,
+				"user":           "",
+				"user_id":        ctx.User,
+				"region":         ctx.Region,
+			}
+			if !noLookup {
+				ctxTimeout, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
+				defer cancel()
+				details, err := fetchIdentity(ctxTimeout, cfg.Options.OCIConfigPath, ctx.Profile, ctx.Region, ctx.TenancyOCID, ctx.CompartmentOCID, ctx.User)
+				if err != nil {
+					return err
+				}
+				resp["tenancy"] = details.TenancyName
+				resp["tenancy_id"] = details.TenancyOCID
+				resp["compartment"] = details.CompartmentName
+				resp["compartment_id"] = details.CompartmentOCID
+				resp["user"] = details.UserName
+				resp["user_id"] = details.UserOCID
+				resp["region"] = details.Region
 			}
 			if plain {
 				line := fmt.Sprintf(
@@ -79,9 +89,16 @@ func newStatusCmd() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "profile: %s\n", resp["profile"])
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "auth: %s\n", resp["auth_method"])
-				fmt.Fprintf(cmd.OutOrStdout(), "tenancy: %s (%s)\n", resp["tenancy"], resp["tenancy_id"])
-				fmt.Fprintf(cmd.OutOrStdout(), "compartment: %s (%s)\n", resp["compartment"], resp["compartment_id"])
-				fmt.Fprintf(cmd.OutOrStdout(), "user: %s (%s)\n", resp["user"], resp["user_id"])
+				printNameAndID := func(label, name, id string) {
+					if name == "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", label, id)
+						return
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s: %s (%s)\n", label, name, id)
+				}
+				printNameAndID("tenancy", resp["tenancy"], resp["tenancy_id"])
+				printNameAndID("compartment", resp["compartment"], resp["compartment_id"])
+				printNameAndID("user", resp["user"], resp["user_id"])
 				fmt.Fprintf(cmd.OutOrStdout(), "region: %s\n", resp["region"])
 				return nil
 			case "json":
@@ -98,12 +115,12 @@ func newStatusCmd() *cobra.Command {
 					profilePart = fmt.Sprintf(" profile=%s", resp["profile"])
 				}
 				line := fmt.Sprintf(
-					"context=%s%s auth=%s tenancy=%s (%s) compartment=%s (%s) user=%s (%s) region=%s",
+					"context=%s%s auth=%s tenancy=%s compartment=%s user=%s region=%s",
 					resp["context"], profilePart,
 					resp["auth_method"],
-					resp["tenancy"], abbrevOCID(resp["tenancy_id"]),
-					resp["compartment"], abbrevOCID(resp["compartment_id"]),
-					resp["user"], abbrevOCID(resp["user_id"]),
+					formatStatusPlainValue(resp["tenancy"], resp["tenancy_id"]),
+					formatStatusPlainValue(resp["compartment"], resp["compartment_id"]),
+					formatStatusPlainValue(resp["user"], resp["user_id"]),
 					resp["region"],
 				)
 				fmt.Fprintln(cmd.OutOrStdout(), line)
@@ -118,5 +135,14 @@ func newStatusCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
 	cmd.Flags().StringVarP(&output, "out", "o", "", "Output format: json|yaml|plain (default: human-readable)")
 	cmd.Flags().BoolVarP(&plain, "plain", "p", false, "Plain IDs only (OCIDs, no names)")
+	cmd.Flags().BoolVar(&noLookup, "cached", false, "Read config/current context only; do not query OCI identity")
+	cmd.Flags().BoolVar(&noLookup, "no-lookup", false, "Read config/current context only; do not query OCI identity")
 	return cmd
+}
+
+func formatStatusPlainValue(name, id string) string {
+	if name == "" {
+		return id
+	}
+	return fmt.Sprintf("%s (%s)", name, abbrevOCID(id))
 }

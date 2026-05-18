@@ -45,6 +45,16 @@ func stubIdentityError(err error) func() {
 	return func() { fetchIdentity = original }
 }
 
+func stubIdentityUnexpected(t *testing.T) func() {
+	t.Helper()
+	original := fetchIdentity
+	fetchIdentity = func(_ctx context.Context, _path, _profile, _region, _tenancyOCID, _compartmentOCID, _userOCID string) (oci.IdentityDetails, error) {
+		t.Fatalf("fetchIdentity should not be called")
+		return oci.IdentityDetails{}, nil
+	}
+	return func() { fetchIdentity = original }
+}
+
 func TestStatusOutputs(t *testing.T) {
 	restore := stubIdentity()
 	defer restore()
@@ -183,6 +193,82 @@ func TestStatusOutputs(t *testing.T) {
 			}
 			got := buf.String()
 			if got != tt.want {
+				t.Fatalf("output mismatch\nwant:\n%q\ngot:\n%q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestStatusCachedOutputsWithoutIdentityLookup(t *testing.T) {
+	restore := stubIdentityUnexpected(t)
+	defer restore()
+
+	cfg := config.Config{
+		Options: config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{{
+			Name:            "dev",
+			Profile:         "DEFAULT",
+			AuthMethod:      config.AuthMethodSecurityToken,
+			TenancyOCID:     "ocid1.tenancy.oc1..aaaa",
+			CompartmentOCID: "ocid1.compartment.oc1..bbbb",
+			Region:          "us-phoenix-1",
+			User:            "ocid1.user.oc1..cccc",
+		}},
+		CurrentContext: "dev",
+	}
+	tmp := t.TempDir()
+	cfgPath := tmp + "/config.yml"
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "default cached",
+			args: []string{"status", "--cached"},
+			want: strings.Join([]string{
+				"context: dev",
+				"profile: DEFAULT",
+				"auth: security_token",
+				"tenancy: ocid1.tenancy.oc1..aaaa",
+				"compartment: ocid1.compartment.oc1..bbbb",
+				"user: ocid1.user.oc1..cccc",
+				"region: us-phoenix-1",
+				"",
+			}, "\n"),
+		},
+		{
+			name: "json cached",
+			args: []string{"status", "--cached", "-o", "json"},
+			want: "{\n  \"auth_method\": \"security_token\",\n  \"compartment\": \"\",\n  \"compartment_id\": \"ocid1.compartment.oc1..bbbb\",\n  \"context\": \"dev\",\n  \"profile\": \"DEFAULT\",\n  \"region\": \"us-phoenix-1\",\n  \"tenancy\": \"\",\n  \"tenancy_id\": \"ocid1.tenancy.oc1..aaaa\",\n  \"user\": \"\",\n  \"user_id\": \"ocid1.user.oc1..cccc\"\n}\n",
+		},
+		{
+			name: "plain cached",
+			args: []string{"status", "--no-lookup", "-o", "plain"},
+			want: "context=dev profile=DEFAULT auth=security_token tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc region=us-phoenix-1\n",
+		},
+		{
+			name: "plain ids cached",
+			args: []string{"status", "--no-lookup", "-p"},
+			want: "context=dev profile=DEFAULT auth=security_token tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc region=us-phoenix-1\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newStatusCmd()
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetArgs(append(tt.args, "--config", cfgPath))
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if got := buf.String(); got != tt.want {
 				t.Fatalf("output mismatch\nwant:\n%q\ngot:\n%q", tt.want, got)
 			}
 		})

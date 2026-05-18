@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -49,6 +50,91 @@ func TestAuthMethodsCommandOutput(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected methods output to contain %q, got %q", want, got)
 		}
+	}
+}
+
+func TestAuthMethodsCommandJSONOutput(t *testing.T) {
+	cmd := newAuthCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"methods", "--output", "json"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	var got authMethodsResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal methods json: %v\n%s", err, out.String())
+	}
+	if len(got.Methods) != len(config.ValidAuthMethods()) {
+		t.Fatalf("expected %d methods, got %d: %+v", len(config.ValidAuthMethods()), len(got.Methods), got.Methods)
+	}
+	if got.Methods[0].Method != config.AuthMethodAPIKey || got.Methods[0].Actions.Validate != true {
+		t.Fatalf("unexpected first method: %+v", got.Methods[0])
+	}
+}
+
+func TestAuthMethodsCommandYAMLOutput(t *testing.T) {
+	cmd := newAuthCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"methods", "--output", "yaml"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"methods:", "method: api_key", "method: security_token"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected yaml output to contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestAuthShowJSONIncludesDaemonUnavailable(t *testing.T) {
+	cfg := config.Config{
+		Options: config.Options{
+			OCIConfigPath: "/tmp/oci",
+			SocketPath:    t.TempDir() + "/missing.sock",
+		},
+		Contexts: []config.Context{{
+			Name:       "dev",
+			Profile:    "DEFAULT",
+			AuthMethod: config.AuthMethodSecurityToken,
+			User:       "ocid1.user.oc1..cccc",
+		}},
+		CurrentContext: "dev",
+	}
+	tmp := t.TempDir()
+	cfgPath := tmp + "/config.yml"
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	cmd := newAuthCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"show", "--config", cfgPath, "--output", "json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth show: %v\n%s", err, out.String())
+	}
+
+	var got authShowResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal auth show json: %v\n%s", err, out.String())
+	}
+	if got.DaemonAvailable {
+		t.Fatalf("expected daemon unavailable, got %+v", got)
+	}
+	if got.DaemonError == "" {
+		t.Fatalf("expected daemon_error in output, got %+v", got)
+	}
+	if !strings.Contains(out.String(), `"daemon_available": false`) || !strings.Contains(out.String(), `"daemon_error":`) {
+		t.Fatalf("expected daemon availability fields in json, got %s", out.String())
 	}
 }
 

@@ -44,16 +44,31 @@ type authActions struct {
 	Setup    bool `json:"setup" yaml:"setup"`
 }
 
+type authMethodInfo struct {
+	Method      string      `json:"method" yaml:"method"`
+	Description string      `json:"description" yaml:"description"`
+	Actions     authActions `json:"actions" yaml:"actions"`
+	LoginHint   string      `json:"login_hint,omitempty" yaml:"login_hint,omitempty"`
+	RefreshHint string      `json:"refresh_hint,omitempty" yaml:"refresh_hint,omitempty"`
+	SetupHint   string      `json:"setup_hint,omitempty" yaml:"setup_hint,omitempty"`
+}
+
+type authMethodsResult struct {
+	Methods []authMethodInfo `json:"methods" yaml:"methods"`
+}
+
 type authShowResult struct {
-	Context     string                `json:"context" yaml:"context"`
-	Profile     string                `json:"profile" yaml:"profile"`
-	AuthMethod  string                `json:"auth_method" yaml:"auth_method"`
-	User        string                `json:"user,omitempty" yaml:"user,omitempty"`
-	Actions     authActions           `json:"actions" yaml:"actions"`
-	LoginHint   string                `json:"login_hint,omitempty" yaml:"login_hint,omitempty"`
-	RefreshHint string                `json:"refresh_hint,omitempty" yaml:"refresh_hint,omitempty"`
-	SetupHint   string                `json:"setup_hint,omitempty" yaml:"setup_hint,omitempty"`
-	Daemon      *daemonpkg.AuthStatus `json:"daemon,omitempty" yaml:"daemon,omitempty"`
+	Context         string                `json:"context" yaml:"context"`
+	Profile         string                `json:"profile" yaml:"profile"`
+	AuthMethod      string                `json:"auth_method" yaml:"auth_method"`
+	User            string                `json:"user,omitempty" yaml:"user,omitempty"`
+	Actions         authActions           `json:"actions" yaml:"actions"`
+	LoginHint       string                `json:"login_hint,omitempty" yaml:"login_hint,omitempty"`
+	RefreshHint     string                `json:"refresh_hint,omitempty" yaml:"refresh_hint,omitempty"`
+	SetupHint       string                `json:"setup_hint,omitempty" yaml:"setup_hint,omitempty"`
+	DaemonAvailable bool                  `json:"daemon_available" yaml:"daemon_available"`
+	DaemonError     string                `json:"daemon_error,omitempty" yaml:"daemon_error,omitempty"`
+	Daemon          *daemonpkg.AuthStatus `json:"daemon,omitempty" yaml:"daemon,omitempty"`
 }
 
 func authCapabilityForMethod(method string) authCapability {
@@ -93,6 +108,68 @@ func authCapabilityForMethod(method string) authCapability {
 		}
 	default:
 		return authCapability{}
+	}
+}
+
+func authMethodDescription(method string) string {
+	switch method {
+	case config.AuthMethodAPIKey:
+		return "API signing key (default)"
+	case config.AuthMethodSecurityToken:
+		return "Session token from `oci session authenticate`"
+	case config.AuthMethodInstancePrincipal:
+		return "Compute instance principal"
+	case config.AuthMethodResourcePrincipal:
+		return "Resource principal"
+	case config.AuthMethodInstanceOBOUser:
+		return "Cloud Shell delegation token"
+	case config.AuthMethodOKEWorkload:
+		return "OKE workload identity"
+	default:
+		return ""
+	}
+}
+
+func buildAuthMethodsResult() authMethodsResult {
+	methods := config.ValidAuthMethods()
+	result := authMethodsResult{Methods: make([]authMethodInfo, 0, len(methods))}
+	for _, method := range methods {
+		cap := authCapabilityForMethod(method)
+		result.Methods = append(result.Methods, authMethodInfo{
+			Method:      method,
+			Description: authMethodDescription(method),
+			Actions: authActions{
+				Login:    cap.CanLogin,
+				Refresh:  cap.CanRefresh,
+				Validate: cap.CanValidate,
+				Setup:    cap.CanSetup,
+			},
+			LoginHint:   cap.LoginHint,
+			RefreshHint: cap.RefreshHint,
+			SetupHint:   cap.SetupHint,
+		})
+	}
+	return result
+}
+
+func printAuthMethodsResult(cmd *cobra.Command, result authMethodsResult, output string) error {
+	switch strings.ToLower(output) {
+	case "", "text":
+		fmt.Fprintln(cmd.OutOrStdout(), "Supported auth methods:")
+		for _, method := range result.Methods {
+			fmt.Fprintf(cmd.OutOrStdout(), "- %s: %s\n", method.Method, method.Description)
+		}
+		return nil
+	case "json":
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	case "yaml", "yml":
+		enc := yaml.NewEncoder(cmd.OutOrStdout())
+		defer enc.Close()
+		return enc.Encode(result)
+	default:
+		return fmt.Errorf("unsupported output format: %s", output)
 	}
 }
 
@@ -296,20 +373,16 @@ func newAuthCmd() *cobra.Command {
 		return cfg, ctx, nil
 	}
 
-	cmd.AddCommand(&cobra.Command{
+	var methodsOutput string
+	methodsCmd := &cobra.Command{
 		Use:   "methods",
 		Short: "List supported auth methods",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.OutOrStdout(), "Supported auth methods:")
-			fmt.Fprintln(cmd.OutOrStdout(), "- api_key: API signing key (default)")
-			fmt.Fprintln(cmd.OutOrStdout(), "- security_token: Session token from `oci session authenticate`")
-			fmt.Fprintln(cmd.OutOrStdout(), "- instance_principal: Compute instance principal")
-			fmt.Fprintln(cmd.OutOrStdout(), "- resource_principal: Resource principal")
-			fmt.Fprintln(cmd.OutOrStdout(), "- instance_obo_user: Cloud Shell delegation token")
-			fmt.Fprintln(cmd.OutOrStdout(), "- oke_workload_identity: OKE workload identity")
-			return nil
+			return printAuthMethodsResult(cmd, buildAuthMethodsResult(), methodsOutput)
 		},
-	})
+	}
+	methodsCmd.Flags().StringVarP(&methodsOutput, "output", "o", "text", "Output format: text|json|yaml")
+	cmd.AddCommand(methodsCmd)
 
 	var showOutput string
 	showCmd := &cobra.Command{
@@ -346,7 +419,10 @@ func newAuthCmd() *cobra.Command {
 				SetupHint:   cap.SetupHint,
 			}
 			if st, err := fetchDaemonAuthStatus(cfg, name); err == nil {
+				result.DaemonAvailable = true
 				result.Daemon = &st
+			} else {
+				result.DaemonError = err.Error()
 			}
 			switch strings.ToLower(showOutput) {
 			case "", "text":
