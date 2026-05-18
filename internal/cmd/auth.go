@@ -10,6 +10,7 @@ import (
 	"github.com/adrianmross/oci-context/pkg/config"
 	ipcmsg "github.com/adrianmross/oci-context/pkg/ipc"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 type authCapability struct {
@@ -20,6 +21,39 @@ type authCapability struct {
 	LoginHint   string
 	RefreshHint string
 	SetupHint   string
+}
+
+type authEnsureResult struct {
+	OK             bool                `json:"ok" yaml:"ok"`
+	Context        string              `json:"context" yaml:"context"`
+	Profile        string              `json:"profile" yaml:"profile"`
+	AuthMethod     string              `json:"auth_method" yaml:"auth_method"`
+	Validated      bool                `json:"validated" yaml:"validated"`
+	Refreshed      bool                `json:"refreshed" yaml:"refreshed"`
+	LoginAttempted bool                `json:"login_attempted" yaml:"login_attempted"`
+	LoginRequired  bool                `json:"login_required" yaml:"login_required"`
+	HomeRegion     *regionSubscription `json:"home_region,omitempty" yaml:"home_region,omitempty"`
+	Message        string              `json:"message,omitempty" yaml:"message,omitempty"`
+	Error          string              `json:"error,omitempty" yaml:"error,omitempty"`
+}
+
+type authActions struct {
+	Login    bool `json:"login" yaml:"login"`
+	Refresh  bool `json:"refresh" yaml:"refresh"`
+	Validate bool `json:"validate" yaml:"validate"`
+	Setup    bool `json:"setup" yaml:"setup"`
+}
+
+type authShowResult struct {
+	Context     string                `json:"context" yaml:"context"`
+	Profile     string                `json:"profile" yaml:"profile"`
+	AuthMethod  string                `json:"auth_method" yaml:"auth_method"`
+	User        string                `json:"user,omitempty" yaml:"user,omitempty"`
+	Actions     authActions           `json:"actions" yaml:"actions"`
+	LoginHint   string                `json:"login_hint,omitempty" yaml:"login_hint,omitempty"`
+	RefreshHint string                `json:"refresh_hint,omitempty" yaml:"refresh_hint,omitempty"`
+	SetupHint   string                `json:"setup_hint,omitempty" yaml:"setup_hint,omitempty"`
+	Daemon      *daemonpkg.AuthStatus `json:"daemon,omitempty" yaml:"daemon,omitempty"`
 }
 
 func authCapabilityForMethod(method string) authCapability {
@@ -105,6 +139,9 @@ func runOCICapture(cmd *cobra.Command, args []string) ([]byte, error) {
 	return out, nil
 }
 
+var runOCIForAuth = runOCI
+var runOCICaptureForAuth = runOCICapture
+
 type regionSubscriptionList struct {
 	Data []regionSubscription `json:"data"`
 }
@@ -149,6 +186,52 @@ func buildAuthValidateOCIArgs(ctx config.Context, ociConfigPath string) []string
 		args = append(args, "--region", ctx.Region)
 	}
 	return args
+}
+
+func validateAuthContext(cmd *cobra.Command, ctx config.Context, ociConfigPath string) (regionSubscription, error) {
+	out, err := runOCICaptureForAuth(cmd, buildAuthValidateOCIArgs(ctx, ociConfigPath))
+	if err != nil {
+		return regionSubscription{}, err
+	}
+	return findHomeRegion(out)
+}
+
+func printAuthEnsureResult(cmd *cobra.Command, result authEnsureResult, output string) error {
+	switch strings.ToLower(output) {
+	case "", "text":
+		if result.OK {
+			fmt.Fprintf(cmd.OutOrStdout(), "Auth ready for %s (%s)\n", result.Context, result.AuthMethod)
+			if result.Refreshed {
+				fmt.Fprintln(cmd.OutOrStdout(), "refreshed: true")
+			}
+			if result.HomeRegion != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "context: home-region=%s (%s) status=%s\n", result.HomeRegion.RegionName, result.HomeRegion.RegionKey, result.HomeRegion.Status)
+			}
+			return nil
+		}
+		if result.LoginRequired {
+			fmt.Fprintf(cmd.OutOrStdout(), "Auth requires login for %s (%s)\n", result.Context, result.AuthMethod)
+			if result.Message != "" {
+				fmt.Fprintln(cmd.OutOrStdout(), result.Message)
+			}
+			return nil
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Auth not ready for %s (%s)\n", result.Context, result.AuthMethod)
+		if result.Error != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), result.Error)
+		}
+		return nil
+	case "json":
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	case "yaml", "yml":
+		enc := yaml.NewEncoder(cmd.OutOrStdout())
+		defer enc.Close()
+		return enc.Encode(result)
+	default:
+		return fmt.Errorf("unsupported output format: %s", output)
+	}
 }
 
 func fetchDaemonAuthStatus(cfg config.Config, contextName string) (daemonpkg.AuthStatus, error) {
@@ -228,7 +311,8 @@ func newAuthCmd() *cobra.Command {
 		},
 	})
 
-	cmd.AddCommand(&cobra.Command{
+	var showOutput string
+	showCmd := &cobra.Command{
 		Use:   "show",
 		Short: "Show auth settings and available actions for the selected context",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -246,6 +330,37 @@ func newAuthCmd() *cobra.Command {
 			if name == "" {
 				name = cfg.CurrentContext
 			}
+			result := authShowResult{
+				Context:    name,
+				Profile:    ctx.Profile,
+				AuthMethod: method,
+				User:       ctx.User,
+				Actions: authActions{
+					Login:    cap.CanLogin,
+					Refresh:  cap.CanRefresh,
+					Validate: cap.CanValidate,
+					Setup:    cap.CanSetup,
+				},
+				LoginHint:   cap.LoginHint,
+				RefreshHint: cap.RefreshHint,
+				SetupHint:   cap.SetupHint,
+			}
+			if st, err := fetchDaemonAuthStatus(cfg, name); err == nil {
+				result.Daemon = &st
+			}
+			switch strings.ToLower(showOutput) {
+			case "", "text":
+			case "json":
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(result)
+			case "yaml", "yml":
+				enc := yaml.NewEncoder(cmd.OutOrStdout())
+				defer enc.Close()
+				return enc.Encode(result)
+			default:
+				return fmt.Errorf("unsupported output format: %s", showOutput)
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "context: %s\n", name)
 			fmt.Fprintf(cmd.OutOrStdout(), "profile: %s\n", ctx.Profile)
 			fmt.Fprintf(cmd.OutOrStdout(), "auth: %s\n", method)
@@ -262,7 +377,8 @@ func newAuthCmd() *cobra.Command {
 			if cap.SetupHint != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "setup_hint: %s\n", cap.SetupHint)
 			}
-			if st, err := fetchDaemonAuthStatus(cfg, name); err == nil {
+			if result.Daemon != nil {
+				st := *result.Daemon
 				fmt.Fprintf(cmd.OutOrStdout(), "daemon_mode: %s\n", st.Mode)
 				if st.LastValidatedAt != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "daemon_last_validate: %s (ok=%t)\n", st.LastValidatedAt, st.LastValidateOK)
@@ -279,7 +395,9 @@ func newAuthCmd() *cobra.Command {
 			}
 			return nil
 		},
-	})
+	}
+	showCmd.Flags().StringVarP(&showOutput, "output", "o", "text", "Output format: text|json|yaml")
+	cmd.AddCommand(showCmd)
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "set <auth-method>",
@@ -355,11 +473,11 @@ func newAuthCmd() *cobra.Command {
 			method := config.NormalizeAuthMethod(ctx.AuthMethod)
 			switch method {
 			case config.AuthMethodSecurityToken:
-				return runOCI(cmd, []string{"session", "authenticate", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath, "--region", ctx.Region})
+				return runOCIForAuth(cmd, []string{"session", "authenticate", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath, "--region", ctx.Region})
 			case config.AuthMethodAPIKey:
-				return runOCI(cmd, []string{"setup", "config", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
+				return runOCIForAuth(cmd, []string{"setup", "config", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
 			case config.AuthMethodInstancePrincipal:
-				return runOCI(cmd, []string{"setup", "instance-principal"})
+				return runOCIForAuth(cmd, []string{"setup", "instance-principal"})
 			default:
 				return fmt.Errorf("auth method %s does not support login flow; try `oci-context auth validate`", method)
 			}
@@ -382,9 +500,87 @@ func newAuthCmd() *cobra.Command {
 			if method != config.AuthMethodSecurityToken {
 				return fmt.Errorf("refresh is only supported for security_token auth")
 			}
-			return runOCI(cmd, []string{"session", "refresh", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
+			return runOCIForAuth(cmd, []string{"session", "refresh", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
 		},
 	})
+
+	var ensureOutput string
+	var ensureLogin bool
+	ensureCmd := &cobra.Command{
+		Use:   "ensure",
+		Short: "Validate auth and refresh it when supported",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := resolvePath(cmd)
+			if err != nil {
+				return err
+			}
+			cfg, ctx, err := loadTarget(path)
+			if err != nil {
+				return err
+			}
+			method := config.NormalizeAuthMethod(ctx.AuthMethod)
+			name := ctx.Name
+			if name == "" {
+				name = cfg.CurrentContext
+			}
+			result := authEnsureResult{
+				Context:    name,
+				Profile:    ctx.Profile,
+				AuthMethod: method,
+			}
+			if home, err := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath); err == nil {
+				result.OK = true
+				result.Validated = true
+				result.HomeRegion = &home
+				return printAuthEnsureResult(cmd, result, ensureOutput)
+			} else {
+				result.Error = err.Error()
+			}
+			if method == config.AuthMethodSecurityToken {
+				if err := runOCIForAuth(cmd, []string{"session", "refresh", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath}); err == nil {
+					result.Refreshed = true
+					if home, validateErr := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath); validateErr == nil {
+						result.OK = true
+						result.Validated = true
+						result.Error = ""
+						result.HomeRegion = &home
+						return printAuthEnsureResult(cmd, result, ensureOutput)
+					} else {
+						result.Error = validateErr.Error()
+					}
+				} else {
+					result.Error = err.Error()
+				}
+			}
+			if ensureLogin {
+				result.LoginAttempted = true
+				if err := runOCIForAuth(cmd, []string{"session", "authenticate", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath, "--region", ctx.Region}); err != nil {
+					result.Error = err.Error()
+					result.LoginRequired = true
+					_ = printAuthEnsureResult(cmd, result, ensureOutput)
+					return fmt.Errorf("auth ensure failed for %s (%s): %w", name, method, err)
+				}
+				if home, err := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath); err == nil {
+					result.OK = true
+					result.Validated = true
+					result.Error = ""
+					result.HomeRegion = &home
+					return printAuthEnsureResult(cmd, result, ensureOutput)
+				} else {
+					result.Error = err.Error()
+				}
+			}
+			result.LoginRequired = method == config.AuthMethodSecurityToken
+			if result.LoginRequired && result.Message == "" {
+				result.Message = "run `oci-context auth login` or rerun with `oci-context auth ensure --login`"
+			}
+			_ = printAuthEnsureResult(cmd, result, ensureOutput)
+			return fmt.Errorf("auth ensure failed for %s (%s): %s", name, method, result.Error)
+		},
+	}
+	ensureCmd.Flags().StringVarP(&ensureOutput, "output", "o", "text", "Output format: text|json|yaml")
+	ensureCmd.Flags().BoolVar(&ensureLogin, "login", false, "Run interactive login when validate/refresh cannot recover auth")
+	cmd.AddCommand(ensureCmd)
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "validate",
@@ -399,14 +595,9 @@ func newAuthCmd() *cobra.Command {
 				return err
 			}
 			method := config.NormalizeAuthMethod(ctx.AuthMethod)
-			ociArgs := buildAuthValidateOCIArgs(ctx, cfg.Options.OCIConfigPath)
-			out, err := runOCICapture(cmd, ociArgs)
+			homeRegion, err := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath)
 			if err != nil {
 				return fmt.Errorf("auth validate failed for method %s: %w", method, err)
-			}
-			homeRegion, err := findHomeRegion(out)
-			if err != nil {
-				return fmt.Errorf("auth validate succeeded but could not resolve home-region context: %w", err)
 			}
 			fmt.Fprintf(
 				cmd.OutOrStdout(),
@@ -435,10 +626,10 @@ func newAuthCmd() *cobra.Command {
 			}
 			method := config.NormalizeAuthMethod(ctx.AuthMethod)
 			switch method {
-				case config.AuthMethodAPIKey, config.AuthMethodSecurityToken:
-					return runOCI(cmd, []string{"setup", "config", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
+			case config.AuthMethodAPIKey, config.AuthMethodSecurityToken:
+				return runOCIForAuth(cmd, []string{"setup", "config", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath})
 			case config.AuthMethodInstancePrincipal:
-				return runOCI(cmd, []string{"setup", "instance-principal"})
+				return runOCIForAuth(cmd, []string{"setup", "instance-principal"})
 			default:
 				return fmt.Errorf("no setup flow for auth method %s", method)
 			}
