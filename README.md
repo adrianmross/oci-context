@@ -144,6 +144,7 @@ Default human-friendly multiline (omits profile line when context == profile):
 $ oci-context status
 context: dev
 profile: DEFAULT
+auth: api_key
 tenancy: My Tenancy (ocid1.tenancy.oc1..aaaa)
 compartment: My Compartment (ocid1.compartment.oc1..bbbb)
 user: Alice (ocid1.user.oc1..cccc)
@@ -154,14 +155,22 @@ Plain OCIDs only (`-p`):
 
 ```
 $ oci-context status -p
-context=dev profile=DEFAULT tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc region=us-phoenix-1
+context=dev profile=DEFAULT auth=api_key tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc region=us-phoenix-1
 ```
 
 Single-line friendly with abbreviated OCIDs (`-o plain`):
 
 ```
 $ oci-context status -o plain
-context=dev profile=DEFAULT tenancy=My Tenancy (ocid1…aaaa) compartment=My Compartment (ocid1…bbbb) user=Alice (ocid1…cccc) region=us-phoenix-1
+context=dev profile=DEFAULT auth=api_key tenancy=My Tenancy (ocid1…aaaa) compartment=My Compartment (ocid1…bbbb) user=Alice (ocid1…cccc) region=us-phoenix-1
+```
+
+Skip live OCI identity lookups when agents only need cached config/current-context
+state:
+
+```sh
+oci-context status --cached
+oci-context status --no-lookup -o json
 ```
 
 Structured outputs:
@@ -193,7 +202,13 @@ result for agents and scripts:
 ```sh
 oci-context auth ensure --output json
 oci-context auth show --output json
+oci-context auth methods --output json
 ```
+
+`auth methods` supports `--output text|json|yaml` and defaults to the existing
+human text. `auth show --output json` includes `daemon_available` and, when the
+daemon cannot be reached, `daemon_error` so scripts can distinguish unavailable
+daemon state from missing auth data.
 
 If validation and refresh cannot recover a security token, the command reports
 `login_required: true`. To allow an interactive browser login as part of the
