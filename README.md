@@ -101,7 +101,7 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 - `oci-context delete <name>`
 - `oci-context status`
 - `oci-context export --format env|json`
-- `oci-context auth methods|show|set|set-user|login|refresh|validate|setup|notify`
+- `oci-context auth methods|show|set|set-user|login|refresh|ensure|validate|setup|notify`
 - `oci-context setup` (bootstrap config + daemon; auth optional with `--with-auth`)
 - `oci-context daemon serve [--auto-refresh --validate-interval 5m --refresh-interval 15m]`
 - `oci-context daemon install` (installer entrypoint; use subcommands for specific targets)
@@ -183,6 +183,24 @@ Errors:
 ## Integration
 - Shell: `eval $(oci-context export --format env)` sets OCI_CLI_PROFILE, OCI_TENANCY_OCID, OCI_COMPARTMENT_OCID, OCI_REGION.
 - Tools: read JSON via `oci-context export --format json` or query the socket.
+
+### Auth readiness for scripts
+
+Use `auth ensure` before OCI-dependent automation. It validates the selected
+context, refreshes `security_token` auth when possible, and returns a clear
+result for agents and scripts:
+
+```sh
+oci-context auth ensure --output json
+```
+
+If validation and refresh cannot recover a security token, the command reports
+`login_required: true`. To allow an interactive browser login as part of the
+same command, pass `--login`:
+
+```sh
+oci-context auth ensure --login
+```
 
 ## Daemon Auth Monitoring
 The daemon can monitor and maintain auth for one or more contexts in the background.
