@@ -25,6 +25,7 @@ type authCapability struct {
 
 type authEnsureResult struct {
 	OK             bool                `json:"ok" yaml:"ok"`
+	State          string              `json:"state" yaml:"state"`
 	Context        string              `json:"context" yaml:"context"`
 	Profile        string              `json:"profile" yaml:"profile"`
 	AuthMethod     string              `json:"auth_method" yaml:"auth_method"`
@@ -32,9 +33,23 @@ type authEnsureResult struct {
 	Refreshed      bool                `json:"refreshed" yaml:"refreshed"`
 	LoginAttempted bool                `json:"login_attempted" yaml:"login_attempted"`
 	LoginRequired  bool                `json:"login_required" yaml:"login_required"`
+	LoginCommand   string              `json:"login_command,omitempty" yaml:"login_command,omitempty"`
 	HomeRegion     *regionSubscription `json:"home_region,omitempty" yaml:"home_region,omitempty"`
 	Message        string              `json:"message,omitempty" yaml:"message,omitempty"`
 	Error          string              `json:"error,omitempty" yaml:"error,omitempty"`
+}
+
+const (
+	authEnsureStateReady            = "ready"
+	authEnsureStateRefreshed        = "refreshed"
+	authEnsureStateLoginRequired    = "login_required"
+	authEnsureStateLoginFailed      = "login_failed"
+	authEnsureStateValidationFailed = "validation_failed"
+)
+
+type authEnsureOptions struct {
+	Login         bool
+	NoInteractive bool
 }
 
 type authActions struct {
@@ -265,12 +280,114 @@ func buildAuthValidateOCIArgs(ctx config.Context, ociConfigPath string) []string
 	return args
 }
 
+func authLoginCommand(ctx config.Context) string {
+	parts := []string{"oci-context", "auth", "login"}
+	if ctx.Name != "" {
+		parts = append(parts, "--context", ctx.Name)
+	}
+	return strings.Join(parts, " ")
+}
+
+func commandNoInteractive(cmd *cobra.Command) bool {
+	if cliNoInteractive {
+		return true
+	}
+	if flag := cmd.Flag("no-interactive"); flag != nil {
+		v, err := cmd.Flags().GetBool("no-interactive")
+		return err == nil && v
+	}
+	return false
+}
+
+func interactiveDisabledError() error {
+	return fmt.Errorf("interactive login/setup flow disabled by --no-interactive")
+}
+
 func validateAuthContext(cmd *cobra.Command, ctx config.Context, ociConfigPath string) (regionSubscription, error) {
 	out, err := runOCICaptureForAuth(cmd, buildAuthValidateOCIArgs(ctx, ociConfigPath))
 	if err != nil {
 		return regionSubscription{}, err
 	}
 	return findHomeRegion(out)
+}
+
+func runAuthEnsure(cmd *cobra.Command, cfg config.Config, ctx config.Context, name string, opts authEnsureOptions) (authEnsureResult, error) {
+	method := config.NormalizeAuthMethod(ctx.AuthMethod)
+	if name == "" {
+		name = ctx.Name
+	}
+	result := authEnsureResult{
+		Context:    name,
+		Profile:    ctx.Profile,
+		AuthMethod: method,
+	}
+	if home, err := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath); err == nil {
+		result.OK = true
+		result.State = authEnsureStateReady
+		result.Validated = true
+		result.HomeRegion = &home
+		return result, nil
+	} else {
+		result.Error = err.Error()
+	}
+	if method == config.AuthMethodSecurityToken {
+		if err := runOCIForAuth(cmd, []string{"session", "refresh", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath}); err == nil {
+			result.Refreshed = true
+			if home, validateErr := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath); validateErr == nil {
+				result.OK = true
+				result.State = authEnsureStateRefreshed
+				result.Validated = true
+				result.Error = ""
+				result.HomeRegion = &home
+				return result, nil
+			} else {
+				result.Error = validateErr.Error()
+			}
+		} else {
+			result.Error = err.Error()
+		}
+	}
+	if opts.Login {
+		if opts.NoInteractive {
+			result.State = authEnsureStateLoginRequired
+			result.LoginRequired = method == config.AuthMethodSecurityToken
+			result.LoginCommand = authLoginCommand(ctx)
+			result.Message = "run `oci-context auth login` in an interactive shell"
+			if result.Error == "" {
+				result.Error = "interactive login/setup flow disabled by --no-interactive"
+			}
+			return result, fmt.Errorf("auth ensure failed for %s (%s): login required", name, method)
+		}
+		result.LoginAttempted = true
+		if err := runOCIForAuth(cmd, []string{"session", "authenticate", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath, "--region", ctx.Region}); err != nil {
+			result.State = authEnsureStateLoginFailed
+			result.Error = err.Error()
+			result.LoginRequired = true
+			result.LoginCommand = authLoginCommand(ctx)
+			return result, fmt.Errorf("auth ensure failed for %s (%s): %w", name, method, err)
+		}
+		if home, err := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath); err == nil {
+			result.OK = true
+			result.State = authEnsureStateReady
+			result.Validated = true
+			result.Error = ""
+			result.HomeRegion = &home
+			return result, nil
+		} else {
+			result.Error = err.Error()
+		}
+	}
+	result.LoginRequired = method == config.AuthMethodSecurityToken
+	if result.LoginRequired {
+		result.State = authEnsureStateLoginRequired
+		result.LoginCommand = authLoginCommand(ctx)
+		if result.Message == "" {
+			result.Message = "run `oci-context auth login` or rerun with `oci-context auth ensure --login`"
+		}
+	} else {
+		result.State = authEnsureStateValidationFailed
+	}
+	return result, fmt.Errorf("auth ensure failed for %s (%s): %s", name, method, result.Error)
 }
 
 func printAuthEnsureResult(cmd *cobra.Command, result authEnsureResult, output string) error {
@@ -538,6 +655,9 @@ func newAuthCmd() *cobra.Command {
 		Use:   "login",
 		Short: "Start login/bootstrap flow based on current auth method",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if commandNoInteractive(cmd) {
+				return interactiveDisabledError()
+			}
 			path, err := resolvePath(cmd)
 			if err != nil {
 				return err
@@ -594,64 +714,18 @@ func newAuthCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			method := config.NormalizeAuthMethod(ctx.AuthMethod)
 			name := ctx.Name
 			if name == "" {
 				name = cfg.CurrentContext
 			}
-			result := authEnsureResult{
-				Context:    name,
-				Profile:    ctx.Profile,
-				AuthMethod: method,
+			result, err := runAuthEnsure(cmd, cfg, ctx, name, authEnsureOptions{
+				Login:         ensureLogin,
+				NoInteractive: commandNoInteractive(cmd),
+			})
+			if printErr := printAuthEnsureResult(cmd, result, ensureOutput); printErr != nil {
+				return printErr
 			}
-			if home, err := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath); err == nil {
-				result.OK = true
-				result.Validated = true
-				result.HomeRegion = &home
-				return printAuthEnsureResult(cmd, result, ensureOutput)
-			} else {
-				result.Error = err.Error()
-			}
-			if method == config.AuthMethodSecurityToken {
-				if err := runOCIForAuth(cmd, []string{"session", "refresh", "--profile", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath}); err == nil {
-					result.Refreshed = true
-					if home, validateErr := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath); validateErr == nil {
-						result.OK = true
-						result.Validated = true
-						result.Error = ""
-						result.HomeRegion = &home
-						return printAuthEnsureResult(cmd, result, ensureOutput)
-					} else {
-						result.Error = validateErr.Error()
-					}
-				} else {
-					result.Error = err.Error()
-				}
-			}
-			if ensureLogin {
-				result.LoginAttempted = true
-				if err := runOCIForAuth(cmd, []string{"session", "authenticate", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath, "--region", ctx.Region}); err != nil {
-					result.Error = err.Error()
-					result.LoginRequired = true
-					_ = printAuthEnsureResult(cmd, result, ensureOutput)
-					return fmt.Errorf("auth ensure failed for %s (%s): %w", name, method, err)
-				}
-				if home, err := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath); err == nil {
-					result.OK = true
-					result.Validated = true
-					result.Error = ""
-					result.HomeRegion = &home
-					return printAuthEnsureResult(cmd, result, ensureOutput)
-				} else {
-					result.Error = err.Error()
-				}
-			}
-			result.LoginRequired = method == config.AuthMethodSecurityToken
-			if result.LoginRequired && result.Message == "" {
-				result.Message = "run `oci-context auth login` or rerun with `oci-context auth ensure --login`"
-			}
-			_ = printAuthEnsureResult(cmd, result, ensureOutput)
-			return fmt.Errorf("auth ensure failed for %s (%s): %s", name, method, result.Error)
+			return err
 		},
 	}
 	ensureCmd.Flags().StringVarP(&ensureOutput, "output", "o", "text", "Output format: text|json|yaml")
@@ -692,6 +766,9 @@ func newAuthCmd() *cobra.Command {
 		Use:   "setup",
 		Short: "Run setup flow suitable for the selected auth method",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if commandNoInteractive(cmd) {
+				return interactiveDisabledError()
+			}
 			path, err := resolvePath(cmd)
 			if err != nil {
 				return err
@@ -716,6 +793,7 @@ func newAuthCmd() *cobra.Command {
 	pf.StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	pf.BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
 	pf.StringVar(&targetContext, "context", "", "Target context name (default current)")
+	pf.BoolVar(&cliNoInteractive, "no-interactive", false, "Disable interactive login/setup flows")
 	_ = useGlobal // bound/read through resolvePath via flags
 	return cmd
 }
