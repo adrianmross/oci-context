@@ -218,6 +218,19 @@ same command, pass `--login`:
 oci-context auth ensure --login
 ```
 
+## Agent Contract
+
+- Stable automation output is JSON. Agents should prefer `--output json`,
+  `-o json`, or `--format json` for supported commands such as `status`,
+  `export`, `auth ensure`, `auth show`, and daemon status commands.
+- JSON keys are compatibility surface. Add fields when needed, but avoid
+  renaming or removing existing fields without a documented migration path.
+- Preferred local checks are `make fmt`, `make vet`, `make test`,
+  `make lint-workflows`, and `make validate-workflows`.
+- Releases are produced from semantic `v*` tags through GoReleaser. The
+  `auto-release` workflow may create the next tag from Conventional Commit
+  subjects on `main`, but it skips commits that modify workflow files.
+
 ## Daemon Auth Monitoring
 The daemon can monitor and maintain auth for one or more contexts in the background.
 
