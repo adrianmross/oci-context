@@ -100,6 +100,7 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 - `oci-context set <name> --field value`
 - `oci-context delete <name>`
 - `oci-context status`
+- `oci-context doctor`
 - `oci-context export --format env|json`
 - `oci-context auth methods|show|set|set-user|login|refresh|ensure|validate|setup|notify`
 - `oci-context setup` (bootstrap config + daemon; auth optional with `--with-auth`)
@@ -203,6 +204,7 @@ result for agents and scripts:
 oci-context auth ensure --output json
 oci-context auth show --output json
 oci-context auth methods --output json
+oci-context doctor --output json
 ```
 
 `auth methods` supports `--output text|json|yaml` and defaults to the existing
@@ -216,6 +218,20 @@ same command, pass `--login`:
 
 ```sh
 oci-context auth ensure --login
+```
+
+For non-interactive automation, pass `--no-interactive`. This prevents browser
+login/setup flows and reports `login_required` in structured output instead:
+
+```sh
+oci-context --no-interactive auth ensure --login --output json
+```
+
+Use `doctor` for a best-effort local health summary of config, OCI CLI, daemon,
+and auth readiness:
+
+```sh
+oci-context doctor --output json
 ```
 
 ## Agent Contract

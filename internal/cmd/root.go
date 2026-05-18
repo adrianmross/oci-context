@@ -12,6 +12,8 @@ var (
 	version = "dev"
 	commit  = "none"
 	date    = "unknown"
+
+	cliNoInteractive bool
 )
 
 func buildVersionString() string {
@@ -58,6 +60,7 @@ func newRootCmd() *cobra.Command {
 	pf := cmd.PersistentFlags()
 	pf.String("config", "", "Path to config file (default project .oci-context.yml else $HOME/.oci-context/config.yml)")
 	pf.BoolP("global", "g", false, "Force use of global config (~/.oci-context/config.yml)")
+	pf.BoolVar(&cliNoInteractive, "no-interactive", false, "Disable interactive login/setup flows")
 
 	// Subcommands
 	cmd.AddCommand(
@@ -75,6 +78,7 @@ func newRootCmd() *cobra.Command {
 		newExportCmd(),
 		newImportCmd(),
 		newDaemonCmd(),
+		newDoctorCmd(),
 		newTuiCmd(),
 	)
 

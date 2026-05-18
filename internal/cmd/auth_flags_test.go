@@ -4,7 +4,7 @@ import "testing"
 
 func TestAuthPersistentFlagsAvailableOnSubcommands(t *testing.T) {
 	cmd := newAuthCmd()
-	for _, sub := range []string{"show", "validate", "set", "set-user", "login", "refresh", "setup", "methods"} {
+	for _, sub := range []string{"show", "validate", "set", "set-user", "login", "refresh", "setup", "methods", "ensure"} {
 		subcmd, _, err := cmd.Find([]string{sub})
 		if err != nil {
 			t.Fatalf("find subcommand %s: %v", sub, err)
@@ -17,6 +17,9 @@ func TestAuthPersistentFlagsAvailableOnSubcommands(t *testing.T) {
 		}
 		if f := subcmd.Flag("global"); f == nil {
 			t.Fatalf("expected --global flag on auth %s", sub)
+		}
+		if f := subcmd.Flag("no-interactive"); f == nil {
+			t.Fatalf("expected --no-interactive flag on auth %s", sub)
 		}
 	}
 }

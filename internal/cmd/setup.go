@@ -40,6 +40,9 @@ func newSetupCmd() *cobra.Command {
 			}
 
 			if withAuth {
+				if commandNoInteractive(cmd) {
+					return interactiveDisabledError()
+				}
 				if err := runSetupAuth(cmd, path, contextName); err != nil {
 					return err
 				}

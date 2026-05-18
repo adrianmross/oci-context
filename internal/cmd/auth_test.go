@@ -213,12 +213,75 @@ func TestAuthEnsureRefreshesAndOutputsJSON(t *testing.T) {
 		t.Fatalf("auth ensure: %v\n%s", err, out.String())
 	}
 	got := out.String()
-	for _, want := range []string{`"ok": true`, `"refreshed": true`, `"context": "dev"`, `"region-name": "us-ashburn-1"`} {
+	for _, want := range []string{`"ok": true`, `"state": "refreshed"`, `"refreshed": true`, `"context": "dev"`, `"region-name": "us-ashburn-1"`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected output to contain %q, got %s", want, got)
 		}
 	}
 	if refreshes != 1 {
 		t.Fatalf("expected one refresh, got %d", refreshes)
+	}
+}
+
+func TestAuthEnsureNoInteractiveLoginRequiredDoesNotAuthenticate(t *testing.T) {
+	origCapture := runOCICaptureForAuth
+	origRun := runOCIForAuth
+	origNoInteractive := cliNoInteractive
+	defer func() {
+		runOCICaptureForAuth = origCapture
+		runOCIForAuth = origRun
+		cliNoInteractive = origNoInteractive
+	}()
+	cliNoInteractive = false
+
+	runOCICaptureForAuth = func(_ *cobra.Command, _ []string) ([]byte, error) {
+		return nil, fmt.Errorf("expired")
+	}
+	var authenticateCalls int
+	runOCIForAuth = func(_ *cobra.Command, args []string) error {
+		if strings.Join(args[:2], " ") == "session authenticate" {
+			authenticateCalls++
+		}
+		return fmt.Errorf("refresh failed")
+	}
+
+	cfg := config.Config{
+		Options: config.Options{OCIConfigPath: "/tmp/oci"},
+		Contexts: []config.Context{{
+			Name:        "dev",
+			Profile:     "DEFAULT",
+			AuthMethod:  config.AuthMethodSecurityToken,
+			TenancyOCID: "ocid1.tenancy.oc1..aaaa",
+			Region:      "us-phoenix-1",
+		}},
+		CurrentContext: "dev",
+	}
+	tmp := t.TempDir()
+	cfgPath := tmp + "/config.yml"
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--no-interactive", "auth", "ensure", "--config", cfgPath, "--output", "json", "--login"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatalf("expected auth ensure to fail when login is required")
+	}
+	if authenticateCalls != 0 {
+		t.Fatalf("expected no interactive authenticate call, got %d", authenticateCalls)
+	}
+
+	var got authEnsureResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal ensure json: %v\n%s", err, out.String())
+	}
+	if got.State != authEnsureStateLoginRequired || !got.LoginRequired || got.LoginCommand == "" {
+		t.Fatalf("expected structured login_required result, got %+v", got)
+	}
+	if got.LoginAttempted {
+		t.Fatalf("expected login_attempted=false, got %+v", got)
 	}
 }
