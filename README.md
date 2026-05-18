@@ -192,6 +192,7 @@ result for agents and scripts:
 
 ```sh
 oci-context auth ensure --output json
+oci-context auth show --output json
 ```
 
 If validation and refresh cannot recover a security token, the command reports

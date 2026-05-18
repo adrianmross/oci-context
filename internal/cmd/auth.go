@@ -37,6 +37,25 @@ type authEnsureResult struct {
 	Error          string              `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
+type authActions struct {
+	Login    bool `json:"login" yaml:"login"`
+	Refresh  bool `json:"refresh" yaml:"refresh"`
+	Validate bool `json:"validate" yaml:"validate"`
+	Setup    bool `json:"setup" yaml:"setup"`
+}
+
+type authShowResult struct {
+	Context     string                `json:"context" yaml:"context"`
+	Profile     string                `json:"profile" yaml:"profile"`
+	AuthMethod  string                `json:"auth_method" yaml:"auth_method"`
+	User        string                `json:"user,omitempty" yaml:"user,omitempty"`
+	Actions     authActions           `json:"actions" yaml:"actions"`
+	LoginHint   string                `json:"login_hint,omitempty" yaml:"login_hint,omitempty"`
+	RefreshHint string                `json:"refresh_hint,omitempty" yaml:"refresh_hint,omitempty"`
+	SetupHint   string                `json:"setup_hint,omitempty" yaml:"setup_hint,omitempty"`
+	Daemon      *daemonpkg.AuthStatus `json:"daemon,omitempty" yaml:"daemon,omitempty"`
+}
+
 func authCapabilityForMethod(method string) authCapability {
 	switch config.NormalizeAuthMethod(method) {
 	case config.AuthMethodSecurityToken:
@@ -292,7 +311,8 @@ func newAuthCmd() *cobra.Command {
 		},
 	})
 
-	cmd.AddCommand(&cobra.Command{
+	var showOutput string
+	showCmd := &cobra.Command{
 		Use:   "show",
 		Short: "Show auth settings and available actions for the selected context",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -310,6 +330,37 @@ func newAuthCmd() *cobra.Command {
 			if name == "" {
 				name = cfg.CurrentContext
 			}
+			result := authShowResult{
+				Context:    name,
+				Profile:    ctx.Profile,
+				AuthMethod: method,
+				User:       ctx.User,
+				Actions: authActions{
+					Login:    cap.CanLogin,
+					Refresh:  cap.CanRefresh,
+					Validate: cap.CanValidate,
+					Setup:    cap.CanSetup,
+				},
+				LoginHint:   cap.LoginHint,
+				RefreshHint: cap.RefreshHint,
+				SetupHint:   cap.SetupHint,
+			}
+			if st, err := fetchDaemonAuthStatus(cfg, name); err == nil {
+				result.Daemon = &st
+			}
+			switch strings.ToLower(showOutput) {
+			case "", "text":
+			case "json":
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(result)
+			case "yaml", "yml":
+				enc := yaml.NewEncoder(cmd.OutOrStdout())
+				defer enc.Close()
+				return enc.Encode(result)
+			default:
+				return fmt.Errorf("unsupported output format: %s", showOutput)
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "context: %s\n", name)
 			fmt.Fprintf(cmd.OutOrStdout(), "profile: %s\n", ctx.Profile)
 			fmt.Fprintf(cmd.OutOrStdout(), "auth: %s\n", method)
@@ -326,7 +377,8 @@ func newAuthCmd() *cobra.Command {
 			if cap.SetupHint != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "setup_hint: %s\n", cap.SetupHint)
 			}
-			if st, err := fetchDaemonAuthStatus(cfg, name); err == nil {
+			if result.Daemon != nil {
+				st := *result.Daemon
 				fmt.Fprintf(cmd.OutOrStdout(), "daemon_mode: %s\n", st.Mode)
 				if st.LastValidatedAt != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "daemon_last_validate: %s (ok=%t)\n", st.LastValidatedAt, st.LastValidateOK)
@@ -343,7 +395,9 @@ func newAuthCmd() *cobra.Command {
 			}
 			return nil
 		},
-	})
+	}
+	showCmd.Flags().StringVarP(&showOutput, "output", "o", "text", "Output format: text|json|yaml")
+	cmd.AddCommand(showCmd)
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "set <auth-method>",
