@@ -5,10 +5,10 @@ case "${1:-}" in
   status)
     cat <<'JSON'
 {
-  "context": "oabcs1-terraform",
-  "profile": "oabcs1-terraform",
+  "context": "dev",
+  "profile": "dev",
   "auth": "security_token",
-  "region": "us-chicago-1"
+  "region": "us-phoenix-1"
 }
 JSON
     ;;
@@ -16,7 +16,7 @@ JSON
     cat <<'JSON'
 {
   "ok": true,
-  "profile": "oabcs1-terraform",
+  "profile": "dev",
   "login_required": false,
   "validated": true
 }
