@@ -8,6 +8,10 @@ auth state once, then let tools read the current context safely.
 
 ![oci-context terminal demo](docs/assets/oci-context-demo.gif)
 
+The demo is generated from `docs/demo/oci-context.tape` with
+[VHS](https://github.com/charmbracelet/vhs), so the README capture shows real
+terminal typing instead of a static mockup.
+
 ## What It Does
 
 - stores named OCI contexts in YAML or JSON
