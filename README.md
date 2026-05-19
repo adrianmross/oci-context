@@ -1,59 +1,127 @@
 # oci-context
 
-A daemon + CLI/TUI to manage OCI context (profile, tenancy, compartment, region) akin to kubectl contexts. Designed to work with other tools by exposing context over a local socket or via `oci-context export`.
+OCI contexts for humans, scripts, and agents.
 
-## Components
-- **Daemon (oci-contextd / `oci-context daemon serve`)**: serves Unix socket APIs and can run background auth validation/refresh loops.
-- **CLI/TUI (oci-context)**: manage contexts, switch current context, export env/JSON, control daemon, and pick via TUI selector.
+`oci-context` gives OCI the same day-to-day ergonomics that `kubectl config
+use-context` gives Kubernetes: switch profile, tenancy, compartment, region, and
+auth state once, then let tools read the current context safely.
+
+![oci-context terminal demo](docs/assets/oci-context-demo.gif)
+
+## What It Does
+
+- stores named OCI contexts in YAML or JSON
+- switches the current OCI profile, region, tenancy, and compartment
+- validates and refreshes OCI auth
+- exposes script-safe JSON/YAML/text output
+- provides a daemon socket for local tools
+- powers higher-level tools such as `bastion-session` and `oci-bassh`
 
 ## Install
 
-One-line install (default: `oci-context` latest stable):
+Homebrew is the preferred install path:
 
-```sh
+```bash
+brew tap adrianmross/tap
+brew install oci-context
+```
+
+The Homebrew binaries are installed at:
+
+```bash
+/opt/homebrew/bin/oci-context
+/opt/homebrew/bin/oci-contextd
+```
+
+Source install:
+
+```bash
 curl -sSL https://raw.githubusercontent.com/adrianmross/oci-context/main/install.sh | bash
 ```
 
-Install daemon binary instead:
+Install the daemon binary instead:
 
-```sh
+```bash
 TOOL=oci-contextd curl -sSL https://raw.githubusercontent.com/adrianmross/oci-context/main/install.sh | bash
 ```
 
-Install a specific version:
+By default the installer writes to `/usr/local/bin`. Override it with `PREFIX`:
 
-```sh
-VERSION=v0.1.0 curl -sSL https://raw.githubusercontent.com/adrianmross/oci-context/main/install.sh | bash
+```bash
+PREFIX="$HOME/.local" curl -sSL https://raw.githubusercontent.com/adrianmross/oci-context/main/install.sh | bash
 ```
 
-### TUI controls (quick reference)
-- `/` to start filtering the current list; hotkeys are suppressed while typing.
-- `Enter` applies the filtered list and in-region modes stages the selection.
-- `Space` stages/highlights the current row (pending save); staged items show in magenta.
-- `Ctrl+S` or `q` saves the staged/current selection from any mode.
-- **Hotkey casing rule:** in the main menu (`contexts`) use lowercase hotkeys; in submenus (`tenancies`, `compartments`, `regions`) use uppercase hotkeys.
-- Main menu (`contexts`): `r` opens regions, `c` opens compartments, `t` opens tenancies.
-- Submenus: `R` opens regions, `C` opens compartments, `T` opens tenancies, `P` returns to profiles/contexts.
-- Navigation: `backspace` goes up/back.
-- Quit without saving: `Esc` or `Ctrl+C`.
+Install a specific release:
 
-## Config
-Config resolution
-- Default path (global): `~/.oci-context/config.yml`
-- Project-aware auto-detection (when `--config` not set and `-g/--global` not set): first match wins in this order
-  - `./.oci-context.yml`
-  - `./.oci-context.json`
-  - `./.oci-context/config.yml`
-  - `./.oci-context/config.json`
-  - `./oci-context.yml`
-  - `./oci-context.json`
-  - `./oci-context/config.yml`
-  - `./oci-context/config.json`
+```bash
+VERSION=v0.14.0 curl -sSL https://raw.githubusercontent.com/adrianmross/oci-context/main/install.sh | bash
+```
 
-Global vs project selection
-- `--config` always overrides
-- `-g, --global` forces the global config (`~/.oci-context/config.yml`)
-- Otherwise the first project-local file found (above) is used; if none found, fall back to global
+## Quickstart
+
+Create or update local config:
+
+```bash
+oci-context init
+oci-context add
+oci-context use dev
+```
+
+Check the active context:
+
+```bash
+oci-context current
+oci-context status
+```
+
+Make sure auth is ready before automation:
+
+```bash
+oci-context auth ensure --output json
+```
+
+Inspect local metadata without calling OCI:
+
+```bash
+oci-context version -o json
+oci-context paths -o json
+oci-context status --cached -o json
+```
+
+## Config Paths
+
+Global config:
+
+```text
+~/.oci-context/config.yml
+```
+
+Project-local config is auto-detected when `--config` and `--global` are not
+set. First match wins:
+
+```text
+./.oci-context.yml
+./.oci-context.json
+./.oci-context/config.yml
+./.oci-context/config.json
+./oci-context.yml
+./oci-context.json
+./oci-context/config.yml
+./oci-context/config.json
+```
+
+Selection rules:
+
+- `--config <path>` always wins
+- `--global` forces `~/.oci-context/config.yml`
+- otherwise the first project-local file wins
+- if no project-local file exists, global config is used
+
+Use `oci-context paths -o json` to see the selected path, selection source,
+project candidates, configured OCI config path, socket path, and any nonfatal
+config load error.
+
+Example config:
 
 ```yaml
 options:
@@ -69,431 +137,120 @@ contexts:
     region: us-phoenix-1
     user: alice@example.com
     notes: dev tenancy
-  - name: prod
-    profile: PROD
-    tenancy_ocid: ocid1.tenancy.oc1..cccc
-    compartment_ocid: ocid1.compartment.oc1..dddd
-    region: us-ashburn-1
 current_context: dev
 ```
 
-## IPC API (Unix socket, framed JSON)
-Requests include:
-- `{ "method": "get_current" }`
-- `{ "method": "use_context", "name": "dev" }`
-- `{ "method": "list" }`
-- `{ "method": "add_context", "context": { ... } }`
-- `{ "method": "delete_context", "name": "dev" }`
-- `{ "method": "export", "format": "env|json" }`
-- `{ "method": "auth_status", "name": "dev" }` (name optional; defaults to current)
+## Commands
 
-Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
-
-## CLI commands
-- `oci-context --version` or `oci-context -v`
-- `oci-context version -o text|json|yaml`
-- `oci-context paths -o text|json|yaml`
-- `oci-context init`
-- `oci-context list`
-- `oci-context current`
-- `oci-context oci -- <oci args...>` (runs OCI CLI with current context defaults)
-- `oci-context use <name>`
-- `oci-context add`
-- `oci-context set <name> --field value`
-- `oci-context delete <name>`
-- `oci-context status`
-- `oci-context doctor`
-- `oci-context export --format env|json`
-- `oci-context auth methods|show|set|set-user|login|refresh|ensure|validate|setup|notify`
-- `oci-context setup` (bootstrap config + daemon; auth optional with `--with-auth`)
-- `oci-context daemon serve [--auto-refresh --validate-interval 5m --refresh-interval 15m]`
-- `oci-context daemon install` (installer entrypoint; use subcommands for specific targets)
-- `oci-context daemon up` (one-command restart + nudge after return/wake)
-- `oci-context daemon doctor` (diagnose daemon/service/socket/auth health)
-- `oci-context daemon auth-status [--context <name>]`
-- `oci-context daemon nudge [--context <name>]`
-- `oci-context daemon monitor list|add|remove|clear`
-- `oci-context daemon install launchd|sleepwatcher|hammerspoon|systemd`
-- `oci-context auth notify` (macOS manual trigger)
-- `oci-context tui`
-
-### OCI CLI Defaults (Transparent `oci` Usage)
-To run plain `oci ...` commands without repeatedly passing `--profile`, `--region`, and `--compartment-id`, load managed OCI CLI defaults once per shell:
-
-```sh
-eval "$(oci-context export -f oci-env)"
+```bash
+oci-context --version
+oci-context version -o text|json|yaml
+oci-context paths -o text|json|yaml
+oci-context init
+oci-context list
+oci-context current
+oci-context use <name>
+oci-context add
+oci-context set <name> --field value
+oci-context delete <name>
+oci-context status --cached -o json
+oci-context doctor --output json
+oci-context oci -- <oci args...>
+oci-context auth methods|show|set|set-user|login|refresh|ensure|validate|setup|notify
+oci-context daemon serve
+oci-context daemon up
+oci-context daemon doctor
+oci-context tui
 ```
 
-This sets:
-- `OCI_CLI_RC_FILE` to a managed rc file updated from your current context
-- `OCI_CLI_CONFIG_FILE` to your configured OCI config path
-
-After that, when you run `oci-context use ...` (or save from TUI), the managed OCI CLI defaults are refreshed automatically.
-
-### current
-Prints only the current context name.
-
-```
-$ oci-context current
-dev
-```
-
-### status
-Shows current context details with friendly names by default.
-
-Default human-friendly multiline (omits profile line when context == profile):
-
-```
-$ oci-context status
-context: dev
-profile: DEFAULT
-auth: api_key
-tenancy: My Tenancy (ocid1.tenancy.oc1..aaaa)
-compartment: My Compartment (ocid1.compartment.oc1..bbbb)
-user: Alice (ocid1.user.oc1..cccc)
-region: us-phoenix-1
-```
-
-Plain OCIDs only (`-p`):
-
-```
-$ oci-context status -p
-context=dev profile=DEFAULT auth=api_key tenancy=ocid1.tenancy.oc1..aaaa compartment=ocid1.compartment.oc1..bbbb user=ocid1.user.oc1..cccc region=us-phoenix-1
-```
-
-Single-line friendly with abbreviated OCIDs (`-o plain`):
-
-```
-$ oci-context status -o plain
-context=dev profile=DEFAULT auth=api_key tenancy=My Tenancy (ocid1…aaaa) compartment=My Compartment (ocid1…bbbb) user=Alice (ocid1…cccc) region=us-phoenix-1
-```
-
-Skip live OCI identity lookups when agents only need cached config/current-context
-state:
-
-```sh
-oci-context status --cached
-oci-context status --no-lookup -o json
-```
-
-Structured outputs:
-
-```
-$ oci-context status -o json
-{ "context": "dev", "profile": "DEFAULT", ... }
-
-$ oci-context status -o yaml
-context: dev
-profile: DEFAULT
-...
-```
-
-Errors:
-- If no current context is set, returns: `no current context set`.
-- If a bad `-o` value is provided, returns: `unsupported output format: <value>`.
-
-## Integration
-- Shell: `eval $(oci-context export --format env)` sets OCI_CLI_PROFILE, OCI_TENANCY_OCID, OCI_COMPARTMENT_OCID, OCI_REGION.
-- Tools: read JSON via `oci-context export --format json` or query the socket.
-
-### Operator Metadata
-Use `version` and `paths` for script-safe local metadata without querying OCI:
-
-```sh
-oci-context version -o json
-oci-context paths -o json
-```
-
-`version` reports the binary version, commit, build date, and the same summary
-string printed by the root `--version --version` path. `paths` reports the
-resolved config path, why it was selected (`explicit`, `global_flag`,
-`project`, or `global_fallback`), the global config path, project-local
-candidate paths, and configured OCI/socket paths when the selected config can be
-loaded. If the selected config cannot be loaded, `paths` still prints path
-metadata and includes `config_error` in structured output.
-
-### Auth readiness for scripts
+## Auth Readiness
 
 Use `auth ensure` before OCI-dependent automation. It validates the selected
 context, refreshes `security_token` auth when possible, and returns a clear
-result for agents and scripts:
+structured result:
 
-```sh
+```bash
 oci-context auth ensure --output json
 oci-context auth show --output json
 oci-context auth methods --output json
 oci-context doctor --output json
 ```
 
-`auth methods` supports `--output text|json|yaml` and defaults to the existing
-human text. `auth show --output json` includes `daemon_available` and, when the
-daemon cannot be reached, `daemon_error` so scripts can distinguish unavailable
-daemon state from missing auth data.
-
 If validation and refresh cannot recover a security token, the command reports
 `login_required: true`. To allow an interactive browser login as part of the
-same command, pass `--login`:
+same command:
 
-```sh
+```bash
 oci-context auth ensure --login
 ```
 
-For non-interactive automation, pass `--no-interactive`. This prevents browser
-login/setup flows and reports `login_required` in structured output instead:
+For non-interactive automation:
 
-```sh
+```bash
 oci-context --no-interactive auth ensure --login --output json
 ```
 
-Use `doctor` for a best-effort local health summary of config, OCI CLI, daemon,
-and auth readiness:
+## OCI CLI Defaults
 
-```sh
-oci-context doctor --output json
+To run plain `oci ...` commands without repeatedly passing profile, region, and
+compartment, load managed OCI CLI defaults once per shell:
+
+```bash
+eval "$(oci-context export -f oci-env)"
 ```
+
+This sets:
+
+- `OCI_CLI_RC_FILE` to a managed rc file updated from your current context
+- `OCI_CLI_CONFIG_FILE` to your configured OCI config path
+
+After that, `oci-context use ...` and TUI saves refresh the managed OCI CLI
+defaults automatically.
+
+## TUI Controls
+
+- `/` starts filtering
+- `Enter` applies the filtered list and stages in-region selections
+- `Space` stages or highlights the current row
+- `Ctrl+S` or `q` saves
+- `Esc` or `Ctrl+C` quits without saving
+- `backspace` goes back
+- main menu hotkeys are lowercase: `r`, `c`, `t`
+- submenu hotkeys are uppercase: `R`, `C`, `T`, `P`
 
 ## Agent Contract
 
-- Stable automation output is JSON. Agents should prefer `--output json`,
-  `-o json`, or `--format json` for supported commands such as `status`,
-  `paths`, `version`, `export`, `auth ensure`, `auth show`, and daemon status
-  commands.
-- JSON keys are compatibility surface. Add fields when needed, but avoid
-  renaming or removing existing fields without a documented migration path.
-- Preferred local checks are `make fmt`, `make vet`, `make test`,
-  `make lint-workflows`, and `make validate-workflows`.
-- Releases are produced from semantic `v*` tags through GoReleaser. The
-  `auto-release` workflow may create the next tag from Conventional Commit
-  subjects on `main`, but it skips commits that modify workflow files.
+Stable automation output is JSON. Agents should prefer `--output json`,
+`-o json`, or `--format json` for supported commands such as `status`, `paths`,
+`version`, `export`, `auth ensure`, `auth show`, and daemon status commands.
 
-## Daemon Auth Monitoring
-The daemon can monitor and maintain auth for one or more contexts in the background.
+Use `status --cached -o json`, `auth show --output json`, and
+`auth ensure --output json` for ordinary inspection. Use `export` only when the
+task is explicitly to export shell environment settings or hand a context to
+another process.
 
-- If `options.daemon_contexts` is empty, daemon monitors `current_context`.
-- If `options.daemon_contexts` has entries, daemon monitors all listed contexts.
-- `security_token` contexts: daemon validates and refreshes based on intervals.
-- Other auth methods: daemon validates only.
-- Failure handling uses exponential backoff and stderr rate-limiting to reduce noise.
+## IPC API
 
-Manage monitored contexts:
+The daemon serves framed JSON over a Unix socket.
 
-```sh
-oci-context daemon monitor add dev prod
-oci-context daemon monitor list
-oci-context daemon monitor remove dev
-oci-context daemon monitor clear
+Example requests:
+
+```json
+{ "method": "get_current" }
+{ "method": "use_context", "name": "dev" }
+{ "method": "list" }
+{ "method": "export", "format": "env" }
+{ "method": "auth_status", "name": "dev" }
 ```
 
-Trigger immediate maintenance without waiting for interval:
+Responses use:
 
-```sh
-oci-context daemon nudge
-oci-context daemon nudge --context dev
+```json
+{ "ok": true, "data": {} }
 ```
 
-Run daemon with auth maintenance enabled:
+or:
 
-```sh
-oci-context daemon serve --auto-refresh --validate-interval 5m --refresh-interval 15m
+```json
+{ "ok": false, "error": "..." }
 ```
-
-Check runtime status:
-
-```sh
-oci-context daemon auth-status --context dev
-oci-context auth show --context dev
-```
-
-## Background Service
-### macOS (`launchd`)
-One-shot install/reload (recommended):
-
-```sh
-oci-context daemon install
-```
-
-Verbose mode for setup/doctor/up/install commands:
-
-```sh
-oci-context daemon install --verbose
-oci-context daemon doctor --verbose
-oci-context daemon up --verbose
-```
-
-This writes the launchd plist, (re)loads it, and kickstarts the job so the running daemon uses the current binary.
-
-Quick recovery when you return to your computer:
-
-```sh
-oci-context daemon up
-```
-
-This kickstarts the launchd daemon and sends an immediate nudge.
-
-Run diagnostics:
-
-```sh
-oci-context daemon doctor
-```
-
-Short aliases:
-- `oci-context daemon fix` == `oci-context daemon recover` == `oci-context daemon up`
-- `oci-context daemon check` == `oci-context daemon doctor`
-
-Generate a plist:
-
-```sh
-oci-context daemon install launchd \
-  --binary /path/to/oci-context \
-  --config ~/.oci-context/config.yml \
-  --auto-refresh \
-  --validate-interval 5m \
-  --refresh-interval 15m
-```
-
-Then load/start:
-
-```sh
-launchctl unload ~/Library/LaunchAgents/com.adrianmross.oci-context.daemon.plist 2>/dev/null || true
-launchctl load ~/Library/LaunchAgents/com.adrianmross.oci-context.daemon.plist
-launchctl start com.adrianmross.oci-context.daemon
-```
-
-After reinstalling/upgrading `oci-context`, restart the running launchd job so the daemon picks up the new binary. Otherwise, IPC commands can hit stale behavior (for example, `daemon nudge` returning `method not implemented` while help/docs show it):
-
-```sh
-launchctl kickstart -k gui/$(id -u)/com.adrianmross.oci-context.daemon
-```
-
-### sleep/wake automation with sleepwatcher
-Install wake hook automation (restarts daemon + nudges auth checks on wake):
-
-```sh
-brew install sleepwatcher
-oci-context daemon install sleepwatcher
-```
-
-### Actionable wake notifications with Hammerspoon (macOS)
-Install managed Hammerspoon integration plus a wake hook script that sends clickable notifications. Clicking `Re-auth now` runs `oci session authenticate` for the affected profile.
-
-```sh
-brew install --cask hammerspoon
-oci-context daemon install hammerspoon
-```
-
-Notes:
-- This command writes/updates:
-  - `~/.hammerspoon/oci_context.lua` (managed URL handler + auth task runner)
-  - `~/.hammerspoon/init.lua` (adds `pcall(require, "oci_context")` when missing)
-  - `~/.wakeup` (wake script that nudges daemon and raises actionable notifications on auth failures)
-- If you prefer manual reload, run with `--reload=false` and then:
-
-```sh
-open -g 'hammerspoon://reloadConfig'
-```
-
-Manually trigger an actionable notification from CLI:
-
-```sh
-oci-context auth notify --context dev --reason "manual check"
-oci-context auth notify --context dev --reason "manual check" --tenancy-name your-tenancy
-```
-
-`--tenancy-name` is optional. When omitted, `notify` uses the selected context's `tenancy_ocid`.
-`--native-notify` defaults to false; enable it if you also want a native macOS notification.
-If `terminal-notifier` is installed, `notify` uses it and clicking the native notification opens the Hammerspoon URL action.
-
-### Linux (`systemd`, user service)
-One-shot install for a user service:
-
-```sh
-oci-context daemon install systemd
-```
-
-### Top-level Bootstrap
-Run project/global config bootstrap and daemon setup in one command:
-
-```sh
-oci-context setup
-```
-
-Useful options:
-- `--no-daemon` skip daemon setup
-- `--with-auth` also run auth setup for selected context
-- `--context <name>` choose auth setup context
-- `--verbose` print underlying system commands
-
-or generate manually:
-
-Example unit file (`~/.config/systemd/user/oci-context-daemon.service`):
-
-```ini
-[Unit]
-Description=oci-context daemon
-After=network-online.target
-
-[Service]
-ExecStart=/path/to/oci-context daemon serve --config %h/.oci-context/config.yml --auto-refresh --validate-interval 5m --refresh-interval 15m
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-```
-
-Enable and start:
-
-```sh
-systemctl --user daemon-reload
-systemctl --user enable --now oci-context-daemon
-systemctl --user status oci-context-daemon
-```
-## Status
-Work in progress.
-
----
-
-## Development and CI/CD
-
-### Local prerequisites
-- Go (from `go.mod` go version; currently 1.25.6)
-- `actionlint` (for workflow linting): `brew install actionlint` **or** `go install github.com/rhysd/actionlint/cmd/actionlint@latest`
-- `act` (for local workflow dry runs): `brew install act` **or** `go install github.com/nektos/act@latest`
-
-Check tool availability:
-```sh
-make tools
-```
-
-### Local validation
-Runs formatting, vet, tests, actionlint, and an `act` dry run against a sample PR payload:
-```sh
-make validate
-```
-Targets:
-- `make fmt`
-- `make vet`
-- `make test`
-- `make lint-workflows`
-- `make validate-workflows` (uses `.github/testdata/pull_request.json`)
-
-### GitHub Actions workflows
-- **CI** (`.github/workflows/ci.yml`): on push/PR to main/develop/release/**; runs gofmt (checks diff), go vet, go test, actionlint.
-- **Release** (`.github/workflows/release.yml`): on tag `v*` or manual dispatch; validates tag, runs tests, and uses GoReleaser to publish cross-platform tarballs plus `checksums.txt`.
-- **CD** (`.github/workflows/cd.yml`): manual `workflow_dispatch` with `env` input; placeholder deploy step to be customized.
-
-### Release tagging flow
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
-This triggers the Release workflow, builds binaries, and attaches them to the GitHub release.
-
-### Acting CI locally
-Example dry-run of CI with act (requires Docker):
-```sh
-act pull_request --eventpath .github/testdata/pull_request.json --dryrun
-```
-
-### Repository
-Private GitHub repo: https://github.com/adrianmross/oci-context
