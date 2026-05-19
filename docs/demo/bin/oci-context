@@ -1,40 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+c_reset=$'\033[0m'
+c_key=$'\033[38;5;81m'
+c_string=$'\033[38;5;150m'
+c_bool=$'\033[38;5;221m'
+c_error=$'\033[38;5;203m'
+
+key() { printf '%b"%s"%b' "$c_key" "$1" "$c_reset"; }
+str() { printf '%b"%s"%b' "$c_string" "$1" "$c_reset"; }
+bool() { printf '%b%s%b' "$c_bool" "$1" "$c_reset"; }
+
 case "${1:-}" in
   status)
-    cat <<'JSON'
-{
-  "context": "dev",
-  "profile": "dev",
-  "auth": "security_token",
-  "region": "us-phoenix-1"
-}
-JSON
+    printf '{\n  '; key context; printf ': '; str dev; printf ',\n'
+    printf '  '; key profile; printf ': '; str dev; printf ',\n'
+    printf '  '; key auth; printf ': '; str security_token; printf ',\n'
+    printf '  '; key region; printf ': '; str us-phoenix-1; printf '\n}\n'
     ;;
   auth)
-    cat <<'JSON'
-{
-  "ok": true,
-  "profile": "dev",
-  "login_required": false,
-  "validated": true
-}
-JSON
+    printf '{\n  '; key ok; printf ': '; bool true; printf ',\n'
+    printf '  '; key profile; printf ': '; str dev; printf ',\n'
+    printf '  '; key login_required; printf ': '; bool false; printf ',\n'
+    printf '  '; key validated; printf ': '; bool true; printf '\n}\n'
     ;;
   paths)
-    cat <<'JSON'
-{
-  "binary": "/opt/homebrew/bin/oci-context",
-  "config_path": "~/.oci-context/config.yml",
-  "config_source": "global_fallback",
-  "oci_config_path": "~/.oci/config",
-  "socket_path": "~/.oci-context/daemon.sock"
-}
-JSON
+    printf '{\n  '; key binary; printf ': '; str /opt/homebrew/bin/oci-context; printf ',\n'
+    printf '  '; key config_path; printf ': '; str '~/.oci-context/config.yml'; printf ',\n'
+    printf '  '; key config_source; printf ': '; str global_fallback; printf ',\n'
+    printf '  '; key oci_config_path; printf ': '; str '~/.oci/config'; printf ',\n'
+    printf '  '; key socket_path; printf ': '; str '~/.oci-context/daemon.sock'; printf '\n}\n'
     ;;
   *)
-    echo "oci-context demo shim: unsupported command" >&2
+    printf '%boci-context demo shim: unsupported command%b\n' "$c_error" "$c_reset" >&2
     exit 2
     ;;
 esac
