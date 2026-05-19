@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  status)
+    cat <<'JSON'
+{
+  "context": "oabcs1-terraform",
+  "profile": "oabcs1-terraform",
+  "auth": "security_token",
+  "region": "us-chicago-1"
+}
+JSON
+    ;;
+  auth)
+    cat <<'JSON'
+{
+  "ok": true,
+  "profile": "oabcs1-terraform",
+  "login_required": false,
+  "validated": true
+}
+JSON
+    ;;
+  paths)
+    cat <<'JSON'
+{
+  "binary": "/opt/homebrew/bin/oci-context",
+  "config_path": "~/.oci-context/config.yml",
+  "config_source": "global_fallback",
+  "oci_config_path": "~/.oci/config",
+  "socket_path": "~/.oci-context/daemon.sock"
+}
+JSON
+    ;;
+  *)
+    echo "oci-context demo shim: unsupported command" >&2
+    exit 2
+    ;;
+esac
