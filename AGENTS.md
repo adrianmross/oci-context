@@ -42,6 +42,14 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
   `auto-release` workflow can create semantic tags from Conventional Commit
   subjects on `main` while skipping commits that modify workflows.
 
+## Demo Assets
+- The README terminal capture is generated from `docs/demo/oci-context.tape` with VHS.
+- Keep the README focused on product usage; implementation details for regenerating the capture belong here.
+- Use fictional examples in demo assets, currently `dev`, `us-phoenix-1`, and sample OCID-shaped placeholders.
+- After changing demo scripts or tapes, run:
+  - `vhs validate docs/demo/oci-context.tape`
+  - `vhs docs/demo/oci-context.tape`
+
 ## Background Service
 - macOS: install/reload launchd daemon in one step:
   - `oci-context daemon install`
