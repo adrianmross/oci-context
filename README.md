@@ -91,6 +91,8 @@ Responses: `{ "ok": true, "data": ... }` or `{ "ok": false, "error": "..." }`.
 
 ## CLI commands
 - `oci-context --version` or `oci-context -v`
+- `oci-context version -o text|json|yaml`
+- `oci-context paths -o text|json|yaml`
 - `oci-context init`
 - `oci-context list`
 - `oci-context current`
@@ -194,6 +196,22 @@ Errors:
 - Shell: `eval $(oci-context export --format env)` sets OCI_CLI_PROFILE, OCI_TENANCY_OCID, OCI_COMPARTMENT_OCID, OCI_REGION.
 - Tools: read JSON via `oci-context export --format json` or query the socket.
 
+### Operator Metadata
+Use `version` and `paths` for script-safe local metadata without querying OCI:
+
+```sh
+oci-context version -o json
+oci-context paths -o json
+```
+
+`version` reports the binary version, commit, build date, and the same summary
+string printed by the root `--version --version` path. `paths` reports the
+resolved config path, why it was selected (`explicit`, `global_flag`,
+`project`, or `global_fallback`), the global config path, project-local
+candidate paths, and configured OCI/socket paths when the selected config can be
+loaded. If the selected config cannot be loaded, `paths` still prints path
+metadata and includes `config_error` in structured output.
+
 ### Auth readiness for scripts
 
 Use `auth ensure` before OCI-dependent automation. It validates the selected
@@ -238,7 +256,8 @@ oci-context doctor --output json
 
 - Stable automation output is JSON. Agents should prefer `--output json`,
   `-o json`, or `--format json` for supported commands such as `status`,
-  `export`, `auth ensure`, `auth show`, and daemon status commands.
+  `paths`, `version`, `export`, `auth ensure`, `auth show`, and daemon status
+  commands.
 - JSON keys are compatibility surface. Add fields when needed, but avoid
   renaming or removing existing fields without a documented migration path.
 - Preferred local checks are `make fmt`, `make vet`, `make test`,

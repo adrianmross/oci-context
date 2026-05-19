@@ -65,6 +65,8 @@ func newRootCmd() *cobra.Command {
 	// Subcommands
 	cmd.AddCommand(
 		newInitCmd(),
+		newVersionCmd(),
+		newPathsCmd(),
 		newListCmd(),
 		newCurrentCmd(),
 		newAuthCmd(),
