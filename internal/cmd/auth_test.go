@@ -213,7 +213,7 @@ func TestAuthEnsureRefreshesAndOutputsJSON(t *testing.T) {
 		t.Fatalf("auth ensure: %v\n%s", err, out.String())
 	}
 	got := out.String()
-	for _, want := range []string{`"ok": true`, `"state": "refreshed"`, `"refreshed": true`, `"context": "dev"`, `"region-name": "us-ashburn-1"`} {
+	for _, want := range []string{`"ok": true`, `"state": "refreshed"`, `"refreshed": true`, `"ready": true`, `"action_required": false`, `"action": "none"`, `"context": "dev"`, `"region-name": "us-ashburn-1"`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected output to contain %q, got %s", want, got)
 		}
@@ -280,6 +280,9 @@ func TestAuthEnsureNoInteractiveLoginRequiredDoesNotAuthenticate(t *testing.T) {
 	}
 	if got.State != authEnsureStateLoginRequired || !got.LoginRequired || got.LoginCommand == "" {
 		t.Fatalf("expected structured login_required result, got %+v", got)
+	}
+	if got.Ready || !got.ActionRequired || got.Action != "login" || got.Severity != "error" {
+		t.Fatalf("expected machine-readable login action, got %+v", got)
 	}
 	if got.LoginAttempted {
 		t.Fatalf("expected login_attempted=false, got %+v", got)

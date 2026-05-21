@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,29 +14,29 @@ import (
 
 // Config represents the persisted state for oci-context.
 type Config struct {
-	Options        Options   `yaml:"options"`
-	Contexts       []Context `yaml:"contexts"`
-	CurrentContext string    `yaml:"current_context"`
+	Options        Options   `yaml:"options" json:"options"`
+	Contexts       []Context `yaml:"contexts" json:"contexts"`
+	CurrentContext string    `yaml:"current_context" json:"current_context"`
 }
 
 // Options holds global settings.
 type Options struct {
-	OCIConfigPath  string   `yaml:"oci_config_path"`
-	SocketPath     string   `yaml:"socket_path"`
-	DefaultProfile string   `yaml:"default_profile"`
-	DaemonContexts []string `yaml:"daemon_contexts,omitempty"`
+	OCIConfigPath  string   `yaml:"oci_config_path" json:"oci_config_path"`
+	SocketPath     string   `yaml:"socket_path" json:"socket_path"`
+	DefaultProfile string   `yaml:"default_profile" json:"default_profile"`
+	DaemonContexts []string `yaml:"daemon_contexts,omitempty" json:"daemon_contexts,omitempty"`
 }
 
 // Context describes a selectable OCI context.
 type Context struct {
-	Name            string `yaml:"name"`
-	Profile         string `yaml:"profile"`
-	AuthMethod      string `yaml:"auth_method,omitempty"`
-	TenancyOCID     string `yaml:"tenancy_ocid"`
-	CompartmentOCID string `yaml:"compartment_ocid"`
-	Region          string `yaml:"region"`
-	User            string `yaml:"user"`
-	Notes           string `yaml:"notes"`
+	Name            string `yaml:"name" json:"name"`
+	Profile         string `yaml:"profile" json:"profile"`
+	AuthMethod      string `yaml:"auth_method,omitempty" json:"auth_method,omitempty"`
+	TenancyOCID     string `yaml:"tenancy_ocid" json:"tenancy_ocid"`
+	CompartmentOCID string `yaml:"compartment_ocid" json:"compartment_ocid"`
+	Region          string `yaml:"region" json:"region"`
+	User            string `yaml:"user" json:"user"`
+	Notes           string `yaml:"notes" json:"notes"`
 }
 
 var (
@@ -139,14 +140,50 @@ func Save(path string, cfg Config) error {
 	}
 	defer lock.Unlock()
 
-	data, err := yaml.Marshal(&cfg)
+	var data []byte
+	var err error
+	if strings.EqualFold(filepath.Ext(path), ".json") {
+		data, err = json.MarshalIndent(&cfg, "", "  ")
+		if err == nil {
+			data = append(data, '\n')
+		}
+	} else {
+		data, err = yaml.Marshal(&cfg)
+	}
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return nil
+	return writeFileAtomic(path, data, 0o600)
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	return os.Chmod(path, perm)
 }
 
 // GetContext finds a context by name.

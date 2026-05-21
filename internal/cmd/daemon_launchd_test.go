@@ -73,6 +73,7 @@ func TestRenderWakeupScriptWithHammerspoon(t *testing.T) {
 		`hammerspoon://oci-auth-needed`,
 		`daemon auth-status`,
 		`daemon nudge`,
+		`action_required`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("expected hammerspoon wake script to contain %q", want)

@@ -123,3 +123,57 @@ func TestMonitoredContextNamesFallbackAndDedup(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthStatusReadinessAllowsFailedRefreshWhenValidateOK(t *testing.T) {
+	got := toAuthStatus(authStatusState{
+		ContextName:      "dev",
+		AuthMethod:       config.AuthMethodSecurityToken,
+		LastValidatedAt:  time.Now(),
+		LastValidateOK:   true,
+		LastRefreshedAt:  time.Now(),
+		LastRefreshOK:    false,
+		LastError:        "refresh failed",
+		Mode:             "managed-security-token",
+		HomeRegionName:   "us-ashburn-1",
+		HomeRegionKey:    "IAD",
+		HomeRegionStatus: "READY",
+	})
+
+	if !got.Ready || got.ActionRequired || got.Action != "none" {
+		t.Fatalf("expected validate-ok status to be ready without action, got %+v", got)
+	}
+	if got.Severity != "warning" {
+		t.Fatalf("expected refresh failure to downgrade severity to warning, got %+v", got)
+	}
+}
+
+func TestAuthStatusReadinessSecurityTokenFailureRequiresLogin(t *testing.T) {
+	got := toAuthStatus(authStatusState{
+		ContextName:     "dev",
+		AuthMethod:      config.AuthMethodSecurityToken,
+		LastValidatedAt: time.Now(),
+		LastValidateOK:  false,
+		LastError:       "expired token",
+		Mode:            "managed-security-token",
+	})
+
+	if got.Ready || !got.ActionRequired || got.Action != "login" || got.Severity != "error" {
+		t.Fatalf("expected security-token validation failure to require login, got %+v", got)
+	}
+}
+
+func TestFinalizeAuthStatusBackfillsOlderDaemonStatus(t *testing.T) {
+	got := FinalizeAuthStatus(AuthStatus{
+		ContextName:     "dev",
+		AuthMethod:      config.AuthMethodSecurityToken,
+		LastValidatedAt: "2026-05-21T08:00:00Z",
+		LastValidateOK:  true,
+		LastRefreshedAt: "2026-05-21T07:55:00Z",
+		LastRefreshOK:   false,
+		Mode:            "managed-security-token",
+	})
+
+	if !got.Ready || got.ActionRequired || got.Action != "none" || got.Severity != "warning" {
+		t.Fatalf("expected older validate-ok status to be finalized as ready warning, got %+v", got)
+	}
+}

@@ -26,6 +26,15 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
   - `oci-context daemon auth-status [--context <name>]`
   - `oci-context daemon doctor [--context <name>]`
   - `oci-context auth show --context <name>`
+- Daemon/auth JSON status exposes derived readiness fields:
+  - `ready`
+  - `action_required`
+  - `action`
+  - `severity`
+  - `reason`
+- For `security_token`, treat `last_validate_ok=true` as ready even when the
+  last refresh did not succeed; refresh failure alone should not page or notify
+  if validation still proves the token works.
 - If using `security_token`, ensure the target OCI profile has valid token/session material.
 - If refresh fails persistently, re-authenticate (`oci session authenticate ...`).
 
@@ -53,7 +62,12 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 ## Background Service
 - macOS: install/reload launchd daemon in one step:
   - `oci-context daemon install`
+- macOS: install/reload all integrations, monitor contexts, and recover:
+  - `oci-context daemon repair --all --monitor <context>`
+  - `oci-context setup daemon --all --monitor <context>`
 - specific targets: `oci-context daemon install launchd|sleepwatcher|hammerspoon`
+- When installing multiple macOS integrations, write Hammerspoon last because it
+  owns the actionable wake script that sleepwatcher executes.
 - macOS: quick restart + nudge when returning to machine:
   - `oci-context daemon up`
   - aliases: `oci-context daemon recover`, `oci-context daemon fix`

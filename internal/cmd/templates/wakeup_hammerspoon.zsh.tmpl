@@ -76,10 +76,10 @@ if [ -z "${status_json}" ]; then
 fi
 
 context_name="$(extract_string context_name)"
-auth_method="$(extract_string auth_method)"
 last_validate_ok="$(extract_bool last_validate_ok)"
-last_refresh_ok="$(extract_bool last_refresh_ok)"
+action_required="$(extract_bool action_required)"
 last_error="$(extract_string last_error)"
+reason="$(extract_string reason)"
 
 profile=""
 if [ -n "${context_name}" ]; then
@@ -87,12 +87,10 @@ if [ -n "${context_name}" ]; then
 fi
 region="$(extract_context_region "${context_name}" | head -n1)"
 
-if [ "${auth_method}" = "security_token" ]; then
-  if [ "${last_validate_ok}" != "true" ] || [ "${last_refresh_ok}" != "true" ]; then
-    notify_actionable "${profile}" "${context_name}" "${last_error}" "${region}"
-  fi
-else
-  if [ "${last_validate_ok}" != "true" ]; then
+if [ "${action_required}" = "true" ] || { [ -z "${action_required}" ] && [ "${last_validate_ok}" != "true" ]; }; then
+  if [ -n "${reason}" ]; then
+    notify_actionable "${profile}" "${context_name}" "${reason}" "${region}"
+  else
     notify_actionable "${profile}" "${context_name}" "${last_error}" "${region}"
   fi
 fi

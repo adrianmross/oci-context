@@ -117,6 +117,10 @@ Selection rules:
 - otherwise the first project-local file wins
 - if no project-local file exists, global config is used
 
+When the selected config path ends in `.json`, writes preserve JSON encoding.
+Other config paths are written as YAML. Config writes are protected by a file
+lock and atomic rename.
+
 Use `oci-context paths -o json` to see the selected path, selection source,
 project candidates, configured OCI config path, socket path, and any nonfatal
 config load error.
@@ -159,7 +163,9 @@ oci-context oci -- <oci args...>
 oci-context auth methods|show|set|set-user|login|refresh|ensure|validate|setup|notify
 oci-context daemon serve
 oci-context daemon up
+oci-context daemon repair --all --monitor dev
 oci-context daemon doctor
+oci-context setup daemon --all --monitor dev
 oci-context tui
 ```
 
@@ -176,6 +182,14 @@ oci-context auth methods --output json
 oci-context doctor --output json
 ```
 
+Structured auth results include both detailed booleans and a small decision
+surface for wrappers:
+
+- `ready`
+- `action_required`
+- `action` (`none`, `login`, or `check_auth`)
+- `severity` (`ok` or `error`)
+
 If validation and refresh cannot recover a security token, the command reports
 `login_required: true`. To allow an interactive browser login as part of the
 same command:
@@ -188,6 +202,47 @@ For non-interactive automation:
 
 ```bash
 oci-context --no-interactive auth ensure --login --output json
+```
+
+## Daemon Health
+
+Install or refresh all macOS daemon integrations and monitor a context:
+
+```bash
+oci-context setup daemon --all --monitor dev
+```
+
+Equivalent daemon-focused form:
+
+```bash
+oci-context daemon repair --all --monitor dev
+```
+
+For a lightweight post-wake or pre-work check:
+
+```bash
+oci-context daemon auth-status
+oci-context auth ensure --no-interactive
+```
+
+`daemon auth-status` includes a daemon-specific readiness contract:
+
+- `ready`: validation currently proves auth is usable.
+- `action_required`: something needs operator or automation action.
+- `action`: `none`, `nudge`, `login`, or `check_auth`.
+- `severity`: `ok`, `warning`, or `error`.
+- `reason`: human-readable explanation for the decision.
+
+For `security_token` contexts, a failed refresh is not by itself an action when
+validation still succeeds. This avoids wake notifications for healthy sessions
+that were not freshly refreshed.
+
+Use structured daemon diagnostics for automation:
+
+```bash
+oci-context daemon doctor --output json
+oci-context daemon nudge --output json
+oci-context daemon recover --output json
 ```
 
 ## OCI CLI Defaults
