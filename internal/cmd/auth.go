@@ -33,6 +33,10 @@ type authEnsureResult struct {
 	Refreshed      bool                `json:"refreshed" yaml:"refreshed"`
 	LoginAttempted bool                `json:"login_attempted" yaml:"login_attempted"`
 	LoginRequired  bool                `json:"login_required" yaml:"login_required"`
+	Ready          bool                `json:"ready" yaml:"ready"`
+	ActionRequired bool                `json:"action_required" yaml:"action_required"`
+	Action         string              `json:"action" yaml:"action"`
+	Severity       string              `json:"severity" yaml:"severity"`
 	LoginCommand   string              `json:"login_command,omitempty" yaml:"login_command,omitempty"`
 	HomeRegion     *regionSubscription `json:"home_region,omitempty" yaml:"home_region,omitempty"`
 	Message        string              `json:"message,omitempty" yaml:"message,omitempty"`
@@ -326,7 +330,7 @@ func runAuthEnsure(cmd *cobra.Command, cfg config.Config, ctx config.Context, na
 		result.State = authEnsureStateReady
 		result.Validated = true
 		result.HomeRegion = &home
-		return result, nil
+		return finalizeAuthEnsureResult(result), nil
 	} else {
 		result.Error = err.Error()
 	}
@@ -339,7 +343,7 @@ func runAuthEnsure(cmd *cobra.Command, cfg config.Config, ctx config.Context, na
 				result.Validated = true
 				result.Error = ""
 				result.HomeRegion = &home
-				return result, nil
+				return finalizeAuthEnsureResult(result), nil
 			} else {
 				result.Error = validateErr.Error()
 			}
@@ -356,7 +360,7 @@ func runAuthEnsure(cmd *cobra.Command, cfg config.Config, ctx config.Context, na
 			if result.Error == "" {
 				result.Error = "interactive login/setup flow disabled by --no-interactive"
 			}
-			return result, fmt.Errorf("auth ensure failed for %s (%s): login required", name, method)
+			return finalizeAuthEnsureResult(result), fmt.Errorf("auth ensure failed for %s (%s): login required", name, method)
 		}
 		result.LoginAttempted = true
 		if err := runOCIForAuth(cmd, []string{"session", "authenticate", "--profile-name", ctx.Profile, "--config-file", cfg.Options.OCIConfigPath, "--region", ctx.Region}); err != nil {
@@ -364,7 +368,7 @@ func runAuthEnsure(cmd *cobra.Command, cfg config.Config, ctx config.Context, na
 			result.Error = err.Error()
 			result.LoginRequired = true
 			result.LoginCommand = authLoginCommand(ctx)
-			return result, fmt.Errorf("auth ensure failed for %s (%s): %w", name, method, err)
+			return finalizeAuthEnsureResult(result), fmt.Errorf("auth ensure failed for %s (%s): %w", name, method, err)
 		}
 		if home, err := validateAuthContext(cmd, ctx, cfg.Options.OCIConfigPath); err == nil {
 			result.OK = true
@@ -372,7 +376,7 @@ func runAuthEnsure(cmd *cobra.Command, cfg config.Config, ctx config.Context, na
 			result.Validated = true
 			result.Error = ""
 			result.HomeRegion = &home
-			return result, nil
+			return finalizeAuthEnsureResult(result), nil
 		} else {
 			result.Error = err.Error()
 		}
@@ -387,7 +391,30 @@ func runAuthEnsure(cmd *cobra.Command, cfg config.Config, ctx config.Context, na
 	} else {
 		result.State = authEnsureStateValidationFailed
 	}
-	return result, fmt.Errorf("auth ensure failed for %s (%s): %s", name, method, result.Error)
+	return finalizeAuthEnsureResult(result), fmt.Errorf("auth ensure failed for %s (%s): %s", name, method, result.Error)
+}
+
+func finalizeAuthEnsureResult(result authEnsureResult) authEnsureResult {
+	result.Ready = result.OK && result.Validated
+	result.Action = "none"
+	result.Severity = "ok"
+	if result.ActionRequired {
+		return result
+	}
+	if result.Ready {
+		return result
+	}
+	result.ActionRequired = true
+	result.Severity = "error"
+	switch {
+	case result.LoginRequired:
+		result.Action = "login"
+	case result.State == authEnsureStateLoginFailed:
+		result.Action = "login"
+	default:
+		result.Action = "check_auth"
+	}
+	return result
 }
 
 func printAuthEnsureResult(cmd *cobra.Command, result authEnsureResult, output string) error {
@@ -449,7 +476,7 @@ func fetchDaemonAuthStatus(cfg config.Config, contextName string) (daemonpkg.Aut
 	if !resp.OK {
 		return daemonpkg.AuthStatus{}, fmt.Errorf("%s", resp.Error)
 	}
-	return resp.Data, nil
+	return daemonpkg.FinalizeAuthStatus(resp.Data), nil
 }
 
 func newAuthCmd() *cobra.Command {

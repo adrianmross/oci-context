@@ -58,6 +58,59 @@ func newSetupCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noDaemon, "no-daemon", false, "Skip daemon setup")
 	cmd.Flags().BoolVar(&withAuth, "with-auth", false, "Also run auth setup for current/selected context")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print underlying system commands as they run")
+	cmd.AddCommand(newSetupDaemonCmd())
+	return cmd
+}
+
+func newSetupDaemonCmd() *cobra.Command {
+	var (
+		cfgPath        string
+		useGlobal      bool
+		label          string
+		ociContextBin  string
+		monitors       []string
+		all            bool
+		noLaunchd      bool
+		noSleepwatcher bool
+		noHammerspoon  bool
+		recoverNow     bool
+		output         string
+	)
+	cmd := &cobra.Command{
+		Use:   "daemon [context...]",
+		Short: "Install daemon integrations, monitor contexts, and recover daemon health",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := resolveConfigPath(cfgPath, useGlobal)
+			if err != nil {
+				return err
+			}
+			monitors = append(monitors, args...)
+			return runDaemonRepairCmd(cmd, daemonRepairOptions{
+				cfgPath:        path,
+				label:          label,
+				ociContextBin:  ociContextBin,
+				monitors:       monitors,
+				all:            all,
+				noLaunchd:      noLaunchd,
+				noSleepwatcher: noSleepwatcher,
+				noHammerspoon:  noHammerspoon,
+				recoverNow:     recoverNow,
+				output:         output,
+			})
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
+	cmd.Flags().StringVar(&label, "label", daemonLaunchdDefaultLabel, "launchd label")
+	cmd.Flags().StringVar(&ociContextBin, "oci-context-bin", "", "Absolute path to oci-context binary for installed integrations")
+	cmd.Flags().StringVar(&ociContextBin, "binary", "", "Alias for --oci-context-bin")
+	cmd.Flags().StringArrayVar(&monitors, "monitor", nil, "Context to add to daemon monitoring list (repeatable)")
+	cmd.Flags().BoolVar(&all, "all", false, "Install launchd, sleepwatcher, and Hammerspoon integrations")
+	cmd.Flags().BoolVar(&noLaunchd, "no-launchd", false, "Skip launchd install")
+	cmd.Flags().BoolVar(&noSleepwatcher, "no-sleepwatcher", false, "Skip sleepwatcher install")
+	cmd.Flags().BoolVar(&noHammerspoon, "no-hammerspoon", false, "Skip Hammerspoon install")
+	cmd.Flags().BoolVar(&recoverNow, "recover", true, "Recover/restart daemon after installation")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
 	return cmd
 }
 

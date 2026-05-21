@@ -50,6 +50,12 @@ type AuthStatus struct {
 	LastRefreshOK   bool   `json:"last_refresh_ok"`
 	LastError       string `json:"last_error,omitempty"`
 	Mode            string `json:"mode"`
+
+	Ready          bool   `json:"ready"`
+	ActionRequired bool   `json:"action_required"`
+	Action         string `json:"action"`
+	Severity       string `json:"severity"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 type authStatusState struct {
@@ -336,6 +342,50 @@ func toAuthStatus(st authStatusState) AuthStatus {
 	}
 	if !st.LastRefreshedAt.IsZero() {
 		out.LastRefreshedAt = st.LastRefreshedAt.UTC().Format(time.RFC3339)
+	}
+	return FinalizeAuthStatus(out)
+}
+
+// FinalizeAuthStatus fills derived readiness fields. Clients call this too so
+// a freshly upgraded CLI can interpret status from an older running daemon.
+func FinalizeAuthStatus(in AuthStatus) AuthStatus {
+	out := in
+	out.Ready = out.LastValidateOK
+	out.Action = "none"
+	out.Severity = "ok"
+
+	switch {
+	case out.LastValidateOK:
+		out.ActionRequired = false
+		if config.NormalizeAuthMethod(out.AuthMethod) == config.AuthMethodSecurityToken && !out.LastRefreshOK && out.LastRefreshedAt != "" {
+			out.Severity = "warning"
+			out.Reason = "auth validates successfully; the last refresh failed but no login is required while validation succeeds"
+		} else {
+			out.Reason = "auth validates successfully"
+		}
+	case out.LastValidatedAt == "":
+		out.ActionRequired = true
+		out.Action = "nudge"
+		out.Severity = "warning"
+		out.Reason = "daemon has not validated this context yet"
+	case config.NormalizeAuthMethod(out.AuthMethod) == config.AuthMethodSecurityToken:
+		out.ActionRequired = true
+		out.Action = "login"
+		out.Severity = "error"
+		if out.LastError != "" {
+			out.Reason = out.LastError
+		} else {
+			out.Reason = "security token validation failed"
+		}
+	default:
+		out.ActionRequired = true
+		out.Action = "check_auth"
+		out.Severity = "error"
+		if out.LastError != "" {
+			out.Reason = out.LastError
+		} else {
+			out.Reason = "auth validation failed"
+		}
 	}
 	return out
 }

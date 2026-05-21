@@ -17,11 +17,72 @@ import (
 	"github.com/adrianmross/oci-context/pkg/config"
 	ipcmsg "github.com/adrianmross/oci-context/pkg/ipc"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 const daemonLaunchdDefaultLabel = "com.adrianmross.oci-context.daemon"
 
 var daemonVerbose bool
+
+type daemonCommandResult struct {
+	OK    bool        `json:"ok" yaml:"ok"`
+	Error string      `json:"error,omitempty" yaml:"error,omitempty"`
+	Data  interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+}
+
+type daemonDoctorResult struct {
+	Healthy    bool                `json:"healthy" yaml:"healthy"`
+	ConfigPath string              `json:"config_path" yaml:"config_path"`
+	SocketPath string              `json:"socket_path" yaml:"socket_path"`
+	Context    string              `json:"context,omitempty" yaml:"context,omitempty"`
+	Launchd    daemonLaunchdStatus `json:"launchd" yaml:"launchd"`
+	IPC        daemonIPCStatus     `json:"ipc" yaml:"ipc"`
+	AuthStatus *daemon.AuthStatus  `json:"auth_status,omitempty" yaml:"auth_status,omitempty"`
+	Issues     []string            `json:"issues,omitempty" yaml:"issues,omitempty"`
+	Fixes      []string            `json:"fixes,omitempty" yaml:"fixes,omitempty"`
+}
+
+type daemonLaunchdStatus struct {
+	Checked bool   `json:"checked" yaml:"checked"`
+	Target  string `json:"target,omitempty" yaml:"target,omitempty"`
+	State   string `json:"state,omitempty" yaml:"state,omitempty"`
+	Error   string `json:"error,omitempty" yaml:"error,omitempty"`
+	Detail  string `json:"detail,omitempty" yaml:"detail,omitempty"`
+}
+
+type daemonIPCStatus struct {
+	Available bool   `json:"available" yaml:"available"`
+	Error     string `json:"error,omitempty" yaml:"error,omitempty"`
+}
+
+type daemonRepairResult struct {
+	OK         bool     `json:"ok" yaml:"ok"`
+	ConfigPath string   `json:"config_path" yaml:"config_path"`
+	Installed  []string `json:"installed,omitempty" yaml:"installed,omitempty"`
+	Skipped    []string `json:"skipped,omitempty" yaml:"skipped,omitempty"`
+	Monitored  []string `json:"monitored,omitempty" yaml:"monitored,omitempty"`
+	Recovered  bool     `json:"recovered" yaml:"recovered"`
+}
+
+func printDaemonOutput(cmd *cobra.Command, output string, data interface{}, text func() error) error {
+	switch strings.ToLower(output) {
+	case "", "text":
+		if text != nil {
+			return text()
+		}
+		return nil
+	case "json":
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(data)
+	case "yaml", "yml":
+		enc := yaml.NewEncoder(cmd.OutOrStdout())
+		defer enc.Close()
+		return enc.Encode(data)
+	default:
+		return fmt.Errorf("unsupported output format: %s", output)
+	}
+}
 
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -30,7 +91,9 @@ func newDaemonCmd() *cobra.Command {
 	}
 	cmd.PersistentFlags().BoolVarP(&daemonVerbose, "verbose", "v", false, "Print underlying system commands as they run")
 	cmd.AddCommand(newDaemonInstallCmd())
+	cmd.AddCommand(newDaemonRepairCmd())
 	cmd.AddCommand(newDaemonRecoverCmd())
+	cmd.AddCommand(newDaemonUpCmd())
 	cmd.AddCommand(newDaemonDoctorCmd())
 	cmd.AddCommand(newDaemonServeCmd())
 	cmd.AddCommand(newDaemonAuthStatusCmd())
@@ -46,65 +109,97 @@ func newDaemonRecoverCmd() *cobra.Command {
 	var cfgPath string
 	var label string
 	var contextName string
+	var output string
 	cmd := &cobra.Command{
 		Use:   "recover",
 		Short: "Restart launchd daemon and trigger immediate auth maintenance (macOS)",
 		Aliases: []string{
 			"fix",
-			"up",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if runtime.GOOS != "darwin" {
-				return fmt.Errorf("daemon recover is only supported on macOS")
-			}
-			target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
-			if out, err := runCombinedOutput(cmd.OutOrStdout(), "launchctl", "kickstart", "-k", target); err != nil {
-				return fmt.Errorf("launchctl kickstart failed: %v: %s (run `oci-context daemon install` to reinstall/reload service)", err, strings.TrimSpace(string(out)))
-			}
-
-			cfg, _, err := loadDaemonConfig(cfgPath)
-			if err != nil {
-				return err
-			}
-			conn, err := dialDaemonSocketWithRetry(cmd.OutOrStdout(), cfg.Options.SocketPath, 5*time.Second)
-			if err != nil {
-				return fmt.Errorf("daemon restarted but socket dial failed: %w", err)
-			}
-			defer conn.Close()
-			req := ipcmsg.Request{Method: "auth_nudge", Name: contextName}
-			if err := conn.SendRequest(req); err != nil {
-				return err
-			}
-			var resp struct {
-				OK    bool        `json:"ok"`
-				Error string      `json:"error,omitempty"`
-				Data  interface{} `json:"data,omitempty"`
-			}
-			if err := conn.ReadResponse(&resp); err != nil {
-				return err
-			}
-			if !resp.OK {
-				return errors.New(resp.Error)
-			}
-			b, err := json.MarshalIndent(resp.Data, "", "  ")
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), "Launchd daemon restarted and nudged.")
-			fmt.Fprintln(cmd.OutOrStdout(), string(b))
-			return nil
+			return runDaemonRecoverCmd(cmd, cfgPath, label, contextName, output)
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	cmd.Flags().StringVar(&label, "label", daemonLaunchdDefaultLabel, "launchd label")
 	cmd.Flags().StringVar(&contextName, "context", "", "Target context name for nudge (default monitored list)")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
 	return cmd
+}
+
+func newDaemonUpCmd() *cobra.Command {
+	var cfgPath string
+	var label string
+	var contextName string
+	var output string
+	cmd := &cobra.Command{
+		Use:   "up",
+		Short: "Restart daemon and trigger immediate auth maintenance (macOS)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDaemonRecoverCmd(cmd, cfgPath, label, contextName, output)
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&label, "label", daemonLaunchdDefaultLabel, "launchd label")
+	cmd.Flags().StringVar(&contextName, "context", "", "Target context name for nudge (default monitored list)")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
+	return cmd
+}
+
+func runDaemonRecoverCmd(cmd *cobra.Command, cfgPath, label, contextName, output string) error {
+	data, err := runDaemonRecover(cmd.OutOrStdout(), cfgPath, label, contextName)
+	if err != nil {
+		return err
+	}
+	result := daemonCommandResult{OK: true, Data: data}
+	return printDaemonOutput(cmd, output, result, func() error {
+		b, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), "Launchd daemon restarted and nudged.")
+		fmt.Fprintln(cmd.OutOrStdout(), string(b))
+		return nil
+	})
+}
+
+func runDaemonRecover(out io.Writer, cfgPath, label, contextName string) (interface{}, error) {
+	if runtime.GOOS != "darwin" {
+		return nil, fmt.Errorf("daemon recover is only supported on macOS")
+	}
+	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
+	if cmdOut, err := runCombinedOutput(out, "launchctl", "kickstart", "-k", target); err != nil {
+		return nil, fmt.Errorf("launchctl kickstart failed: %v: %s (run `oci-context daemon install` to reinstall/reload service)", err, strings.TrimSpace(string(cmdOut)))
+	}
+
+	cfg, _, err := loadDaemonConfig(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := dialDaemonSocketWithRetry(out, cfg.Options.SocketPath, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("daemon restarted but socket dial failed: %w", err)
+	}
+	defer conn.Close()
+	req := ipcmsg.Request{Method: "auth_nudge", Name: contextName}
+	if err := conn.SendRequest(req); err != nil {
+		return nil, err
+	}
+	var resp daemonCommandResult
+	if err := conn.ReadResponse(&resp); err != nil {
+		return nil, err
+	}
+	if !resp.OK {
+		return nil, errors.New(resp.Error)
+	}
+	return resp.Data, nil
 }
 
 func newDaemonDoctorCmd() *cobra.Command {
 	var cfgPath string
 	var label string
 	var contextName string
+	var output string
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Diagnose daemon health and suggest remediation steps",
@@ -112,93 +207,160 @@ func newDaemonDoctorCmd() *cobra.Command {
 			"check",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			issues := 0
-			cfg, path, err := loadDaemonConfig(cfgPath)
+			result, err := buildDaemonDoctorResult(cmd, cfgPath, label, contextName)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "config: %s\n", path)
-			fmt.Fprintf(cmd.OutOrStdout(), "socket: %s\n", cfg.Options.SocketPath)
-			if contextName == "" {
-				contextName = cfg.CurrentContext
+			if err := printDaemonOutput(cmd, output, result, func() error {
+				printDaemonDoctorText(cmd, result)
+				return nil
+			}); err != nil {
+				return err
 			}
-			if contextName != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "context: %s\n", contextName)
+			if !result.Healthy {
+				return fmt.Errorf("doctor found %d issue(s)", len(result.Issues))
 			}
-
-			if runtime.GOOS == "darwin" {
-				target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
-				if out, err := runCombinedOutput(cmd.OutOrStdout(), "launchctl", "print", target); err != nil {
-					issues++
-					fmt.Fprintf(cmd.OutOrStdout(), "launchd: unhealthy (%v)\n", err)
-					trimmed := strings.TrimSpace(string(out))
-					if trimmed != "" {
-						fmt.Fprintf(cmd.OutOrStdout(), "launchd detail: %s\n", trimmed)
-					}
-					fmt.Fprintln(cmd.OutOrStdout(), "fix: oci-context daemon install")
-				} else {
-					state := "unknown"
-					s := string(out)
-					switch {
-					case strings.Contains(s, "state = running"):
-						state = "running"
-					case strings.Contains(s, "state = waiting"):
-						state = "waiting"
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "launchd: %s (%s)\n", target, state)
-				}
-			}
-
-			conn, err := ipcmsg.Dial(cfg.Options.SocketPath)
-			if err != nil {
-				issues++
-				fmt.Fprintf(cmd.OutOrStdout(), "ipc: unhealthy (%v)\n", err)
-				if runtime.GOOS == "darwin" {
-					fmt.Fprintln(cmd.OutOrStdout(), "fix: oci-context daemon install")
-				} else {
-					fmt.Fprintln(cmd.OutOrStdout(), "fix: oci-context daemon serve --auto-refresh")
-				}
-			} else {
-				defer conn.Close()
-				req := ipcmsg.Request{Method: "auth_status", Name: contextName}
-				if err := conn.SendRequest(req); err != nil {
-					issues++
-					fmt.Fprintf(cmd.OutOrStdout(), "auth-status: unhealthy (%v)\n", err)
-				} else {
-					var resp struct {
-						OK    bool              `json:"ok"`
-						Error string            `json:"error,omitempty"`
-						Data  daemon.AuthStatus `json:"data,omitempty"`
-					}
-					if err := conn.ReadResponse(&resp); err != nil {
-						issues++
-						fmt.Fprintf(cmd.OutOrStdout(), "auth-status: unhealthy (%v)\n", err)
-					} else if !resp.OK {
-						issues++
-						fmt.Fprintf(cmd.OutOrStdout(), "auth-status: unhealthy (%s)\n", resp.Error)
-					} else {
-						fmt.Fprintf(
-							cmd.OutOrStdout(),
-							"auth-status: ok (context=%s validate_ok=%t refresh_ok=%t)\n",
-							resp.Data.ContextName,
-							resp.Data.LastValidateOK,
-							resp.Data.LastRefreshOK,
-						)
-					}
-				}
-			}
-
-			if issues > 0 {
-				return fmt.Errorf("doctor found %d issue(s)", issues)
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), "doctor: healthy")
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	cmd.Flags().StringVar(&label, "label", daemonLaunchdDefaultLabel, "launchd label")
 	cmd.Flags().StringVar(&contextName, "context", "", "Target context name (default current)")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
 	return cmd
+}
+
+func buildDaemonDoctorResult(cmd *cobra.Command, cfgPath, label, contextName string) (daemonDoctorResult, error) {
+	cfg, path, err := loadDaemonConfig(cfgPath)
+	if err != nil {
+		return daemonDoctorResult{}, err
+	}
+	if contextName == "" {
+		contextName = cfg.CurrentContext
+	}
+	result := daemonDoctorResult{
+		ConfigPath: path,
+		SocketPath: cfg.Options.SocketPath,
+		Context:    contextName,
+		Healthy:    true,
+	}
+
+	if runtime.GOOS == "darwin" {
+		target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
+		result.Launchd = daemonLaunchdStatus{Checked: true, Target: target}
+		out, err := runCombinedOutput(cmd.OutOrStdout(), "launchctl", "print", target)
+		if err != nil {
+			result.Healthy = false
+			result.Launchd.Error = err.Error()
+			result.Launchd.Detail = strings.TrimSpace(string(out))
+			result.Issues = append(result.Issues, "launchd daemon is not healthy")
+			result.Fixes = append(result.Fixes, "oci-context daemon install launchd")
+		} else {
+			result.Launchd.State = parseLaunchdState(string(out))
+		}
+	}
+
+	conn, err := ipcmsg.Dial(cfg.Options.SocketPath)
+	if err != nil {
+		result.Healthy = false
+		result.IPC.Error = err.Error()
+		result.Issues = append(result.Issues, "daemon socket is unavailable")
+		if runtime.GOOS == "darwin" {
+			result.Fixes = append(result.Fixes, "oci-context daemon install launchd")
+		} else {
+			result.Fixes = append(result.Fixes, "oci-context daemon serve --auto-refresh")
+		}
+		return result, nil
+	}
+	defer conn.Close()
+	result.IPC.Available = true
+
+	req := ipcmsg.Request{Method: "auth_status", Name: contextName}
+	if err := conn.SendRequest(req); err != nil {
+		result.Healthy = false
+		result.IPC.Error = err.Error()
+		result.Issues = append(result.Issues, "daemon auth-status request failed")
+		return result, nil
+	}
+	var resp struct {
+		OK    bool              `json:"ok"`
+		Error string            `json:"error,omitempty"`
+		Data  daemon.AuthStatus `json:"data,omitempty"`
+	}
+	if err := conn.ReadResponse(&resp); err != nil {
+		result.Healthy = false
+		result.IPC.Error = err.Error()
+		result.Issues = append(result.Issues, "daemon auth-status response failed")
+		return result, nil
+	}
+	if !resp.OK {
+		result.Healthy = false
+		result.IPC.Error = resp.Error
+		result.Issues = append(result.Issues, "daemon auth-status is unhealthy")
+		return result, nil
+	}
+	status := daemon.FinalizeAuthStatus(resp.Data)
+	result.AuthStatus = &status
+	if status.ActionRequired {
+		result.Healthy = false
+		result.Issues = append(result.Issues, status.Reason)
+		switch status.Action {
+		case "login":
+			result.Fixes = append(result.Fixes, fmt.Sprintf("oci-context auth login --context %s", status.ContextName))
+		case "nudge":
+			result.Fixes = append(result.Fixes, fmt.Sprintf("oci-context daemon nudge --context %s", status.ContextName))
+		default:
+			result.Fixes = append(result.Fixes, fmt.Sprintf("oci-context auth ensure --context %s", status.ContextName))
+		}
+	}
+	return result, nil
+}
+
+func parseLaunchdState(s string) string {
+	switch {
+	case strings.Contains(s, "state = running"):
+		return "running"
+	case strings.Contains(s, "state = waiting"):
+		return "waiting"
+	default:
+		return "unknown"
+	}
+}
+
+func printDaemonDoctorText(cmd *cobra.Command, result daemonDoctorResult) {
+	fmt.Fprintf(cmd.OutOrStdout(), "config: %s\n", result.ConfigPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "socket: %s\n", result.SocketPath)
+	if result.Context != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "context: %s\n", result.Context)
+	}
+	if result.Launchd.Checked {
+		if result.Launchd.Error != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "launchd: unhealthy (%s)\n", result.Launchd.Error)
+			if result.Launchd.Detail != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "launchd detail: %s\n", result.Launchd.Detail)
+			}
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "launchd: %s (%s)\n", result.Launchd.Target, result.Launchd.State)
+		}
+	}
+	if !result.IPC.Available {
+		fmt.Fprintf(cmd.OutOrStdout(), "ipc: unhealthy (%s)\n", result.IPC.Error)
+	} else {
+		fmt.Fprintln(cmd.OutOrStdout(), "ipc: healthy")
+	}
+	if result.AuthStatus != nil {
+		st := result.AuthStatus
+		fmt.Fprintf(cmd.OutOrStdout(), "auth-status: ready=%t action_required=%t action=%s severity=%s context=%s validate_ok=%t refresh_ok=%t\n", st.Ready, st.ActionRequired, st.Action, st.Severity, st.ContextName, st.LastValidateOK, st.LastRefreshOK)
+		if st.Reason != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "auth-reason: %s\n", st.Reason)
+		}
+	}
+	for _, fix := range result.Fixes {
+		fmt.Fprintf(cmd.OutOrStdout(), "fix: %s\n", fix)
+	}
+	if result.Healthy {
+		fmt.Fprintln(cmd.OutOrStdout(), "doctor: healthy")
+	}
 }
 
 func newDaemonInstallCmd() *cobra.Command {
@@ -235,17 +397,6 @@ func runDaemonInstallDefault(out io.Writer, cfgPath string) error {
 		); err != nil {
 			return err
 		}
-		if err := runDaemonHammerspoonInstall(
-			out,
-			cfgPath,
-			daemonLaunchdDefaultLabel,
-			"",
-			"",
-			"",
-			false,
-		); err != nil {
-			fmt.Fprintf(out, "warning: hammerspoon install skipped/failed: %v\n", err)
-		}
 		if _, lookErr := exec.LookPath("sleepwatcher"); lookErr == nil {
 			if err := runDaemonSleepwatcherInstall(
 				out,
@@ -262,6 +413,17 @@ func runDaemonInstallDefault(out io.Writer, cfgPath string) error {
 		} else {
 			fmt.Fprintln(out, "sleepwatcher not found; skipping. Install with `brew install sleepwatcher` then run `oci-context daemon install sleepwatcher`.")
 		}
+		if err := runDaemonHammerspoonInstall(
+			out,
+			cfgPath,
+			daemonLaunchdDefaultLabel,
+			"",
+			"",
+			"",
+			false,
+		); err != nil {
+			fmt.Fprintf(out, "warning: hammerspoon install skipped/failed: %v\n", err)
+		}
 		fmt.Fprintln(out, "Install complete. Use `oci-context daemon up` after wake/resume.")
 		return nil
 	case "linux":
@@ -269,6 +431,139 @@ func runDaemonInstallDefault(out io.Writer, cfgPath string) error {
 	default:
 		return fmt.Errorf("daemon install is not supported on %s", runtime.GOOS)
 	}
+}
+
+func newDaemonRepairCmd() *cobra.Command {
+	var (
+		cfgPath        string
+		label          string
+		ociContextBin  string
+		monitors       []string
+		all            bool
+		noLaunchd      bool
+		noSleepwatcher bool
+		noHammerspoon  bool
+		recoverNow     bool
+		output         string
+	)
+	cmd := &cobra.Command{
+		Use:   "repair [context...]",
+		Short: "Install daemon integrations, set monitored contexts, and recover daemon health",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			monitors = append(monitors, args...)
+			return runDaemonRepairCmd(cmd, daemonRepairOptions{
+				cfgPath:        cfgPath,
+				label:          label,
+				ociContextBin:  ociContextBin,
+				monitors:       monitors,
+				all:            all,
+				noLaunchd:      noLaunchd,
+				noSleepwatcher: noSleepwatcher,
+				noHammerspoon:  noHammerspoon,
+				recoverNow:     recoverNow,
+				output:         output,
+			})
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().StringVar(&label, "label", daemonLaunchdDefaultLabel, "launchd label")
+	cmd.Flags().StringVar(&ociContextBin, "oci-context-bin", "", "Absolute path to oci-context binary for installed integrations")
+	cmd.Flags().StringVar(&ociContextBin, "binary", "", "Alias for --oci-context-bin")
+	cmd.Flags().StringArrayVar(&monitors, "monitor", nil, "Context to add to daemon monitoring list (repeatable)")
+	cmd.Flags().BoolVar(&all, "all", false, "Install launchd, sleepwatcher, and Hammerspoon integrations")
+	cmd.Flags().BoolVar(&noLaunchd, "no-launchd", false, "Skip launchd install")
+	cmd.Flags().BoolVar(&noSleepwatcher, "no-sleepwatcher", false, "Skip sleepwatcher install")
+	cmd.Flags().BoolVar(&noHammerspoon, "no-hammerspoon", false, "Skip Hammerspoon install")
+	cmd.Flags().BoolVar(&recoverNow, "recover", true, "Recover/restart daemon after installation")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
+	return cmd
+}
+
+type daemonRepairOptions struct {
+	cfgPath        string
+	label          string
+	ociContextBin  string
+	monitors       []string
+	all            bool
+	noLaunchd      bool
+	noSleepwatcher bool
+	noHammerspoon  bool
+	recoverNow     bool
+	output         string
+}
+
+func runDaemonRepairCmd(cmd *cobra.Command, opts daemonRepairOptions) error {
+	out := cmd.OutOrStdout()
+	if strings.ToLower(opts.output) != "" && strings.ToLower(opts.output) != "text" {
+		out = io.Discard
+	}
+	result, err := runDaemonRepair(out, opts)
+	if err != nil {
+		return err
+	}
+	return printDaemonOutput(cmd, opts.output, result, func() error {
+		for _, item := range result.Installed {
+			fmt.Fprintf(cmd.OutOrStdout(), "installed: %s\n", item)
+		}
+		for _, item := range result.Skipped {
+			fmt.Fprintf(cmd.OutOrStdout(), "skipped: %s\n", item)
+		}
+		if len(result.Monitored) > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "monitored: %s\n", strings.Join(result.Monitored, ", "))
+		}
+		if result.Recovered {
+			fmt.Fprintln(cmd.OutOrStdout(), "recovered: true")
+		}
+		return nil
+	})
+}
+
+func runDaemonRepair(out io.Writer, opts daemonRepairOptions) (daemonRepairResult, error) {
+	if runtime.GOOS != "darwin" {
+		return daemonRepairResult{}, fmt.Errorf("daemon repair is only supported on macOS")
+	}
+	cfg, path, err := loadDaemonConfig(opts.cfgPath)
+	if err != nil {
+		return daemonRepairResult{}, err
+	}
+	result := daemonRepairResult{OK: true, ConfigPath: path}
+
+	if !opts.noLaunchd {
+		if err := runDaemonLaunchdInstall(out, opts.cfgPath, opts.label, opts.ociContextBin, "", "", "", true, 5*time.Minute, 15*time.Minute, true, true); err != nil {
+			return result, err
+		}
+		result.Installed = append(result.Installed, "launchd")
+	}
+	if opts.all && !opts.noSleepwatcher {
+		if _, lookErr := exec.LookPath("sleepwatcher"); lookErr != nil {
+			result.Skipped = append(result.Skipped, "sleepwatcher (binary not found; install with `brew install sleepwatcher`)")
+		} else if err := runDaemonSleepwatcherInstall(out, opts.cfgPath, opts.label, "", "", "", opts.ociContextBin, true); err != nil {
+			result.Skipped = append(result.Skipped, fmt.Sprintf("sleepwatcher (%v)", err))
+		} else {
+			result.Installed = append(result.Installed, "sleepwatcher")
+		}
+	}
+	if opts.all && !opts.noHammerspoon {
+		if err := runDaemonHammerspoonInstall(out, opts.cfgPath, opts.label, "", "", opts.ociContextBin, true); err != nil {
+			result.Skipped = append(result.Skipped, fmt.Sprintf("hammerspoon (%v)", err))
+		} else {
+			result.Installed = append(result.Installed, "hammerspoon")
+		}
+	}
+
+	monitored, err := ensureDaemonMonitorContexts(path, cfg, opts.monitors)
+	if err != nil {
+		return result, err
+	}
+	result.Monitored = monitored
+
+	if opts.recoverNow {
+		if _, err := runDaemonRecover(out, opts.cfgPath, opts.label, ""); err != nil {
+			return result, err
+		}
+		result.Recovered = true
+	}
+	return result, nil
 }
 
 func newDaemonInstallLaunchdCmd() *cobra.Command {
@@ -524,6 +819,7 @@ func newDaemonServeCmd() *cobra.Command {
 func newDaemonAuthStatusCmd() *cobra.Command {
 	var cfgPath string
 	var contextName string
+	var output string
 
 	cmd := &cobra.Command{
 		Use:   "auth-status",
@@ -557,17 +853,21 @@ func newDaemonAuthStatusCmd() *cobra.Command {
 			if !resp.OK {
 				return errors.New(resp.Error)
 			}
-			b, err := json.MarshalIndent(resp.Data, "", "  ")
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), string(b))
-			return nil
+			resp.Data = daemon.FinalizeAuthStatus(resp.Data)
+			return printDaemonOutput(cmd, output, resp.Data, func() error {
+				b, err := json.MarshalIndent(resp.Data, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), string(b))
+				return nil
+			})
 		},
 	}
 
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	cmd.Flags().StringVar(&contextName, "context", "", "Target context name (default current)")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
 	return cmd
 }
 
@@ -622,33 +922,44 @@ func newDaemonMonitorAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			exists := make(map[string]bool, len(cfg.Options.DaemonContexts))
-			for _, name := range cfg.Options.DaemonContexts {
-				exists[name] = true
-			}
-			for _, name := range args {
-				name = strings.TrimSpace(name)
-				if name == "" {
-					continue
-				}
-				if _, err := cfg.GetContext(name); err != nil {
-					return fmt.Errorf("context %q not found", name)
-				}
-				if exists[name] {
-					continue
-				}
-				cfg.Options.DaemonContexts = append(cfg.Options.DaemonContexts, name)
-				exists[name] = true
-			}
-			if err := config.Save(path, cfg); err != nil {
+			monitored, err := ensureDaemonMonitorContexts(path, cfg, args)
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Daemon monitor set: %s\n", strings.Join(cfg.Options.DaemonContexts, ", "))
+			fmt.Fprintf(cmd.OutOrStdout(), "Daemon monitor set: %s\n", strings.Join(monitored, ", "))
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	return cmd
+}
+
+func ensureDaemonMonitorContexts(path string, cfg config.Config, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return cfg.Options.DaemonContexts, nil
+	}
+	exists := make(map[string]bool, len(cfg.Options.DaemonContexts))
+	for _, name := range cfg.Options.DaemonContexts {
+		exists[name] = true
+	}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, err := cfg.GetContext(name); err != nil {
+			return cfg.Options.DaemonContexts, fmt.Errorf("context %q not found", name)
+		}
+		if exists[name] {
+			continue
+		}
+		cfg.Options.DaemonContexts = append(cfg.Options.DaemonContexts, name)
+		exists[name] = true
+	}
+	if err := config.Save(path, cfg); err != nil {
+		return cfg.Options.DaemonContexts, err
+	}
+	return cfg.Options.DaemonContexts, nil
 }
 
 func newDaemonMonitorRemoveCmd() *cobra.Command {
@@ -1134,6 +1445,7 @@ func resolveLaunchdPaths(cfgPath, label, binaryPath, outPath, stdoutPath, stderr
 func newDaemonNudgeCmd() *cobra.Command {
 	var cfgPath string
 	var contextName string
+	var output string
 	cmd := &cobra.Command{
 		Use:   "nudge",
 		Short: "Trigger immediate daemon auth maintenance for monitored or selected context",
@@ -1151,27 +1463,26 @@ func newDaemonNudgeCmd() *cobra.Command {
 			if err := conn.SendRequest(req); err != nil {
 				return err
 			}
-			var resp struct {
-				OK    bool        `json:"ok"`
-				Error string      `json:"error,omitempty"`
-				Data  interface{} `json:"data,omitempty"`
-			}
+			var resp daemonCommandResult
 			if err := conn.ReadResponse(&resp); err != nil {
 				return err
 			}
 			if !resp.OK {
 				return errors.New(resp.Error)
 			}
-			b, err := json.MarshalIndent(resp.Data, "", "  ")
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), string(b))
-			return nil
+			return printDaemonOutput(cmd, output, resp, func() error {
+				b, err := json.MarshalIndent(resp.Data, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), string(b))
+				return nil
+			})
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	cmd.Flags().StringVar(&contextName, "context", "", "Target context name (default monitored list)")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
 	return cmd
 }
 
