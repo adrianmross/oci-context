@@ -1202,19 +1202,17 @@ func newNotifyCmd(use, short string) *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), eventURL)
 				return nil
 			}
-			if out, err := runCombinedOutput(cmd.OutOrStdout(), "open", "-g", eventURL); err != nil {
-				return fmt.Errorf("failed to trigger hammerspoon event: %v: %s", err, strings.TrimSpace(string(out)))
+			msg := fmt.Sprintf("Auth check for %s (%s)", ctxName, prof)
+			if strings.TrimSpace(reason) != "" {
+				msg = fmt.Sprintf("%s\n%s", msg, reason)
+			}
+			if err := sendTerminalNotifierAuthNotification(prof, reg, tenancy, eventURL, msg, "OCI Access Required", ctxName); err != nil {
+				return err
 			}
 			if nativeNotify {
-				msg := fmt.Sprintf("Auth check for %s (%s)", ctxName, prof)
-				if strings.TrimSpace(reason) != "" {
-					msg = fmt.Sprintf("%s\n%s", msg, reason)
-				}
-				if err := sendNativeAuthNotification(eventURL, msg, "oci-context", "Remote trigger"); err != nil {
-					return fmt.Errorf("hammerspoon event sent but native notification failed: %w", err)
-				}
+				fmt.Fprintln(cmd.OutOrStdout(), "native notify is implicit in terminal-notifier backend")
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Triggered Hammerspoon notification for context=%s profile=%s region=%s\n", ctxName, prof, reg)
+			fmt.Fprintf(cmd.OutOrStdout(), "Triggered terminal-notifier auth notification for context=%s profile=%s region=%s\n", ctxName, prof, reg)
 			return nil
 		},
 	}
@@ -1635,6 +1633,53 @@ func buildTerminalNotifierArgs(eventURL, message, title, subtitle string) []stri
 		"-message", message,
 		"-open", eventURL,
 	}
+}
+
+func buildTerminalNotifierAuthArgs(profile, region, tenancyName, eventURL, message, title, subtitle string) []string {
+	reauth := []string{"oci", "session", "authenticate", "--profile-name", profile}
+	if strings.TrimSpace(region) != "" {
+		reauth = append(reauth, "--region", region)
+	}
+	if strings.TrimSpace(tenancyName) != "" {
+		reauth = append(reauth, "--tenancy-name", tenancyName)
+	}
+	args := []string{
+		"-title", title,
+		"-subtitle", subtitle,
+		"-message", message,
+		"-group", "oci-context-auth-" + subtitle,
+		"-sound", "default",
+		"-execute", strings.Join(reauth, " "),
+		"-open", eventURL,
+	}
+	if icon := defaultTerminalNotifierIconPath(); icon != "" {
+		args = append(args, "-appIcon", icon, "-contentImage", icon)
+	}
+	return args
+}
+
+func defaultTerminalNotifierIconPath() string {
+	for _, path := range []string{
+		"/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericNetworkIcon.icns",
+		"/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/AlertCautionIcon.icns",
+	} {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
+func sendTerminalNotifierAuthNotification(profile, region, tenancyName, eventURL, message, title, subtitle string) error {
+	tnPath, err := exec.LookPath("terminal-notifier")
+	if err != nil {
+		return fmt.Errorf("terminal-notifier is required for this branch; install with `brew install terminal-notifier`")
+	}
+	args := buildTerminalNotifierAuthArgs(profile, region, tenancyName, eventURL, message, title, subtitle)
+	if out, err := exec.Command(tnPath, args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("terminal-notifier failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func sendNativeAuthNotification(eventURL, message, title, subtitle string) error {
