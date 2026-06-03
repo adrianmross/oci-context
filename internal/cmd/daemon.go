@@ -1202,19 +1202,18 @@ func newNotifyCmd(use, short string) *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), eventURL)
 				return nil
 			}
-			if out, err := runCombinedOutput(cmd.OutOrStdout(), "open", "-g", eventURL); err != nil {
-				return fmt.Errorf("failed to trigger hammerspoon event: %v: %s", err, strings.TrimSpace(string(out)))
+			msg := fmt.Sprintf("Auth check for %s (%s)", ctxName, prof)
+			if strings.TrimSpace(reason) != "" {
+				msg = fmt.Sprintf("%s\n%s", msg, reason)
+			}
+			result, err := sendAlerterAuthNotification(prof, reg, tenancy, eventURL, msg, "OCI Access Required", ctxName)
+			if err != nil {
+				return err
 			}
 			if nativeNotify {
-				msg := fmt.Sprintf("Auth check for %s (%s)", ctxName, prof)
-				if strings.TrimSpace(reason) != "" {
-					msg = fmt.Sprintf("%s\n%s", msg, reason)
-				}
-				if err := sendNativeAuthNotification(eventURL, msg, "oci-context", "Remote trigger"); err != nil {
-					return fmt.Errorf("hammerspoon event sent but native notification failed: %w", err)
-				}
+				fmt.Fprintln(cmd.OutOrStdout(), "native notify is implicit in alerter backend")
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Triggered Hammerspoon notification for context=%s profile=%s region=%s\n", ctxName, prof, reg)
+			fmt.Fprintf(cmd.OutOrStdout(), "Triggered alerter auth notification for context=%s profile=%s region=%s result=%s\n", ctxName, prof, reg, result)
 			return nil
 		},
 	}
@@ -1635,6 +1634,67 @@ func buildTerminalNotifierArgs(eventURL, message, title, subtitle string) []stri
 		"-message", message,
 		"-open", eventURL,
 	}
+}
+
+func buildAlerterAuthArgs(eventURL, message, title, subtitle string) []string {
+	args := []string{
+		"--title", title,
+		"--subtitle", subtitle,
+		"--message", message,
+		"--actions", "Re-auth now",
+		"--closeLabel", "Dismiss",
+		"--sound", "default",
+		"--timeout", "45",
+		"--group", "oci-context-auth-" + subtitle,
+	}
+	if icon := defaultAlerterIconPath(); icon != "" {
+		args = append(args, "--appIcon", icon, "--contentImage", icon)
+	}
+	_ = eventURL
+	return args
+}
+
+func defaultAlerterIconPath() string {
+	for _, path := range []string{
+		"/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericNetworkIcon.icns",
+		"/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/AlertCautionIcon.icns",
+	} {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
+func buildOCIAuthenticateArgs(profile, region, tenancyName string) []string {
+	args := []string{"session", "authenticate", "--profile-name", profile}
+	if strings.TrimSpace(region) != "" {
+		args = append(args, "--region", region)
+	}
+	if strings.TrimSpace(tenancyName) != "" {
+		args = append(args, "--tenancy-name", tenancyName)
+	}
+	return args
+}
+
+func sendAlerterAuthNotification(profile, region, tenancyName, eventURL, message, title, subtitle string) (string, error) {
+	alerterPath, err := exec.LookPath("alerter")
+	if err != nil {
+		return "", fmt.Errorf("alerter is required for this branch; install with `brew install vjeantet/tap/alerter`")
+	}
+	args := buildAlerterAuthArgs(eventURL, message, title, subtitle)
+	out, err := exec.Command(alerterPath, args...).CombinedOutput()
+	result := strings.TrimSpace(string(out))
+	if err != nil {
+		return result, fmt.Errorf("alerter failed: %v: %s", err, result)
+	}
+	if strings.EqualFold(result, "Re-auth now") || strings.Contains(result, "Re-auth now") || strings.Contains(result, "ACTION") {
+		ociArgs := buildOCIAuthenticateArgs(profile, region, tenancyName)
+		if out, err := exec.Command("oci", ociArgs...).CombinedOutput(); err != nil {
+			return result, fmt.Errorf("oci session authenticate failed after alerter action: %v: %s", err, strings.TrimSpace(string(out)))
+		}
+	}
+	return result, nil
 }
 
 func sendNativeAuthNotification(eventURL, message, title, subtitle string) error {
