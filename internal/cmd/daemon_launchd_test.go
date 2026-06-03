@@ -192,6 +192,40 @@ func TestBuildTerminalNotifierArgs(t *testing.T) {
 	}
 }
 
+func TestRenderOCIAccessNotifierTemplates(t *testing.T) {
+	swift := renderOCIAccessNotifierSwift()
+	for _, want := range []string{
+		`OCI Access Required`,
+		`NSUserNotificationCenter.default`,
+		`actionButtonTitle = "Re-auth now"`,
+		`"session", "authenticate"`,
+		`"--profile-name"`,
+	} {
+		if !strings.Contains(swift, want) {
+			t.Fatalf("expected Swift template to contain %q", want)
+		}
+	}
+	plist := renderOCIAccessInfoPlist()
+	for _, want := range []string{
+		`<string>OCI Access</string>`,
+		`<string>com.adrianmross.oci-access</string>`,
+		`<key>LSUIElement</key>`,
+	} {
+		if !strings.Contains(plist, want) {
+			t.Fatalf("expected Info.plist template to contain %q", want)
+		}
+	}
+}
+
+func TestBuildCustomAppAuthArgs(t *testing.T) {
+	args := buildCustomAppAuthArgs("OPS", "us-chicago-1", "dev", "wake auth failed", "tenancy")
+	got := strings.Join(args, " ")
+	want := "--profile OPS --context dev --reason wake auth failed --region us-chicago-1 --tenancy-name tenancy"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
 func TestRenderHammerspoonModule_LuaSyntax(t *testing.T) {
 	luacPath, err := exec.LookPath("luac")
 	if err != nil {

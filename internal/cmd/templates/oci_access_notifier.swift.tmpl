@@ -1,0 +1,82 @@
+import Cocoa
+
+final class AppDelegate: NSObject, NSApplicationDelegate, NSUserNotificationCenterDelegate {
+    private var profile = "DEFAULT"
+    private var region = ""
+    private var contextName = "current"
+    private var reason = "Authentication required"
+    private var tenancyName = ""
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        parseArgs(CommandLine.arguments)
+        let center = NSUserNotificationCenter.default
+        center.delegate = self
+
+        let note = NSUserNotification()
+        note.title = "OCI Access Required"
+        note.subtitle = contextName
+        note.informativeText = "Auth unhealthy for \(contextName) (\(profile))\n\(reason)"
+        note.soundName = NSUserNotificationDefaultSoundName
+        note.hasActionButton = true
+        note.actionButtonTitle = "Re-auth now"
+        note.otherButtonTitle = "Dismiss"
+        center.deliver(note)
+    }
+
+    func userNotificationCenter(_ center: NSUserNotificationCenter, shouldPresent notification: NSUserNotification) -> Bool {
+        return true
+    }
+
+    func userNotificationCenter(_ center: NSUserNotificationCenter, didActivate notification: NSUserNotification) {
+        if notification.activationType == .actionButtonClicked || notification.activationType == .contentsClicked {
+            runAuthentication()
+        }
+        NSApp.terminate(nil)
+    }
+
+    private func parseArgs(_ args: [String]) {
+        var index = 1
+        while index < args.count {
+            let key = args[index]
+            let value = index + 1 < args.count ? args[index + 1] : ""
+            switch key {
+            case "--profile":
+                profile = value.isEmpty ? "DEFAULT" : value
+                index += 2
+            case "--region":
+                region = value
+                index += 2
+            case "--context":
+                contextName = value.isEmpty ? "current" : value
+                index += 2
+            case "--reason":
+                reason = value.isEmpty ? "Authentication required" : value
+                index += 2
+            case "--tenancy-name":
+                tenancyName = value
+                index += 2
+            default:
+                index += 1
+            }
+        }
+    }
+
+    private func runAuthentication() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        var args = ["oci", "session", "authenticate", "--profile-name", profile]
+        if !region.isEmpty {
+            args += ["--region", region]
+        }
+        if !tenancyName.isEmpty {
+            args += ["--tenancy-name", tenancyName]
+        }
+        task.arguments = args
+        try? task.run()
+    }
+}
+
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()
