@@ -38,6 +38,25 @@ local function joinArgsForLog(bin, args)
   return table.concat(parts, " ")
 end
 
+local notificationIcon = "ASCII:1.......2\n" ..
+  ".BBBBBBB.\n" ..
+  ".B.....B.\n" ..
+  ".B.OOO.B.\n" ..
+  ".B.O.O.B.\n" ..
+  ".B.OOO.B.\n" ..
+  ".B.....B.\n" ..
+  ".BBBBBBB.\n" ..
+  "3.......4"
+
+local function ociNotify(callback, attrs)
+  attrs = attrs or {}
+  attrs.title = attrs.title or "OCI Access"
+  attrs.subTitle = attrs.subTitle or "Session authentication"
+  attrs.setIdImage = attrs.setIdImage or notificationIcon
+  attrs.soundName = attrs.soundName or "default"
+  return hs.notify.new(callback, attrs)
+end
+
 local function runOciAuthenticate(profile, region, contextName, tenancyName)
   local oci = findOciBin()
   local p = (profile and profile ~= "") and profile or "DEFAULT"
@@ -57,8 +76,9 @@ local function runOciAuthenticate(profile, region, contextName, tenancyName)
   end
   local cmd = joinArgsForLog(oci, args)
 
-  hs.notify.new({
-    title = "oci-context",
+  ociNotify(nil, {
+    title = "OCI Access",
+    subTitle = p,
     informativeText = string.format("Starting auth for profile %s", p),
     autoWithdraw = true,
   }):send()
@@ -70,8 +90,9 @@ local function runOciAuthenticate(profile, region, contextName, tenancyName)
     else
       text = "Authentication failed for profile " .. p .. ". Check ~/.hammerspoon/oci-auth.log"
     end
-    hs.notify.new({
-      title = "oci-context",
+    ociNotify(nil, {
+      title = "OCI Access",
+      subTitle = p,
       informativeText = text,
       autoWithdraw = true,
     }):send()
@@ -102,7 +123,7 @@ local function showAuthNeededNotification(profile, contextName, reason, region, 
     msg = msg .. "\n" .. reason
   end
 
-  local n = hs.notify.new(function(notification)
+  local n = ociNotify(function(notification)
     local activation = notification:activationType()
     if activation == hs.notify.activationTypes.actionButtonClicked or activation == hs.notify.activationTypes.contentsClicked then
       hs.timer.doAfter(0, function()
@@ -110,7 +131,8 @@ local function showAuthNeededNotification(profile, contextName, reason, region, 
       end)
     end
   end, {
-    title = "oci-context",
+    title = "OCI Access Required",
+    subTitle = ctx,
     informativeText = msg,
     actionButtonTitle = "Re-auth now",
     hasActionButton = true,
