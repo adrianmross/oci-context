@@ -196,17 +196,19 @@ func TestRenderOCIAccessNotifierTemplates(t *testing.T) {
 	swift := renderOCIAccessNotifierSwift()
 	for _, want := range []string{
 		`OCI Access Required`,
-		`UNUserNotificationCenter.current()`,
-		`UNNotificationAction(`,
-		`title: "Re-auth now"`,
-		`UNNotificationDefaultActionIdentifier`,
 		`presentAuthPrompt()`,
 		`NSAlert()`,
 		`alert.addButton(withTitle: "Re-auth now")`,
-		`resolveOCIPath()`,
-		`"/opt/homebrew/bin/oci"`,
-		`"session", "authenticate"`,
-		`"--profile-name"`,
+		`AudioServicesPlaySystemSound`,
+		`startBrowserAuthentication()`,
+		`playAlertSound()`,
+		`resolvedOCIContextCommand()`,
+		`"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"`,
+		`oci-access.log`,
+		`waitUntilExit()`,
+		`presentAuthenticationError`,
+		`"/opt/homebrew/bin/oci-context"`,
+		`"auth", "login", "--context", contextName`,
 	} {
 		if !strings.Contains(swift, want) {
 			t.Fatalf("expected Swift template to contain %q", want)
@@ -215,6 +217,11 @@ func TestRenderOCIAccessNotifierTemplates(t *testing.T) {
 	for _, unwanted := range []string{
 		`otherButtonTitle`,
 		`NSUserNotification`,
+		`UserNotifications`,
+		`UNUserNotificationCenter`,
+		`UNNotification`,
+		`tell application "Terminal"`,
+		`do script`,
 		`hammerspoon://`,
 		`appIcon`,
 		`contentImage`,
@@ -244,13 +251,22 @@ func TestBuildCustomAppAuthArgs(t *testing.T) {
 	}
 }
 
-func TestSendCustomAppAuthNotificationUsesNewAppInstance(t *testing.T) {
+func TestSendCustomAppAuthNotificationLaunchesBundleExecutable(t *testing.T) {
 	source, err := os.ReadFile("daemon.go")
 	if err != nil {
 		t.Fatalf("read daemon.go: %v", err)
 	}
-	if !strings.Contains(string(source), `[]string{"-n", "-g", "-a", appPath, "--args"}`) {
-		t.Fatalf("custom app launcher should force a new app instance so auth args are not dropped")
+	for _, want := range []string{
+		`filepath.Join(appPath, "Contents", "MacOS", "OCI Access")`,
+		`exec.Command(binaryPath, args...)`,
+		`cmd.Start()`,
+	} {
+		if !strings.Contains(string(source), want) {
+			t.Fatalf("expected custom app launcher to contain %q", want)
+		}
+	}
+	if strings.Contains(string(source), `"open", args...`) {
+		t.Fatalf("custom app launcher should not use Launch Services because it can drop args")
 	}
 }
 

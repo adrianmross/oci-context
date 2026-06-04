@@ -1719,9 +1719,11 @@ func sendCustomAppAuthNotification(profile, region, contextName, reason, tenancy
 	if appPath == "" {
 		return fmt.Errorf("OCI Access.app is required for this branch; install with `oci-context daemon install notifier-app`")
 	}
-	args := append([]string{"-n", "-g", "-a", appPath, "--args"}, buildCustomAppAuthArgs(profile, region, contextName, reason, tenancyName)...)
-	if out, err := exec.Command("open", args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to open OCI Access.app: %v: %s", err, strings.TrimSpace(string(out)))
+	binaryPath := filepath.Join(appPath, "Contents", "MacOS", "OCI Access")
+	args := buildCustomAppAuthArgs(profile, region, contextName, reason, tenancyName)
+	cmd := exec.Command(binaryPath, args...)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to open OCI Access.app: %w", err)
 	}
 	return nil
 }
