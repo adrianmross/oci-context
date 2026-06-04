@@ -197,7 +197,6 @@ func TestBuildTerminalNotifierAuthArgs(t *testing.T) {
 		"OPS",
 		"us-chicago-1",
 		"tenancy",
-		"hammerspoon://oci-auth-needed?x=1",
 		"body",
 		"OCI Access Required",
 		"dev",
@@ -210,11 +209,13 @@ func TestBuildTerminalNotifierAuthArgs(t *testing.T) {
 		"-group oci-context-auth-dev",
 		"-sound default",
 		"-execute oci session authenticate --profile-name OPS --region us-chicago-1 --tenancy-name tenancy",
-		"-open hammerspoon://oci-auth-needed?x=1",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in args %q", want, got)
 		}
+	}
+	if strings.Contains(got, "hammerspoon://") {
+		t.Fatalf("terminal-notifier auth args should not redirect through Hammerspoon: %q", got)
 	}
 }
 

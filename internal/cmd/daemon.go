@@ -1206,7 +1206,7 @@ func newNotifyCmd(use, short string) *cobra.Command {
 			if strings.TrimSpace(reason) != "" {
 				msg = fmt.Sprintf("%s\n%s", msg, reason)
 			}
-			if err := sendTerminalNotifierAuthNotification(prof, reg, tenancy, eventURL, msg, "OCI Access Required", ctxName); err != nil {
+			if err := sendTerminalNotifierAuthNotification(prof, reg, tenancy, msg, "OCI Access Required", ctxName); err != nil {
 				return err
 			}
 			if nativeNotify {
@@ -1635,7 +1635,7 @@ func buildTerminalNotifierArgs(eventURL, message, title, subtitle string) []stri
 	}
 }
 
-func buildTerminalNotifierAuthArgs(profile, region, tenancyName, eventURL, message, title, subtitle string) []string {
+func buildTerminalNotifierAuthArgs(profile, region, tenancyName, message, title, subtitle string) []string {
 	reauth := []string{"oci", "session", "authenticate", "--profile-name", profile}
 	if strings.TrimSpace(region) != "" {
 		reauth = append(reauth, "--region", region)
@@ -1650,7 +1650,6 @@ func buildTerminalNotifierAuthArgs(profile, region, tenancyName, eventURL, messa
 		"-group", "oci-context-auth-" + subtitle,
 		"-sound", "default",
 		"-execute", strings.Join(reauth, " "),
-		"-open", eventURL,
 	}
 	if icon := defaultTerminalNotifierIconPath(); icon != "" {
 		args = append(args, "-appIcon", icon, "-contentImage", icon)
@@ -1670,12 +1669,12 @@ func defaultTerminalNotifierIconPath() string {
 	return ""
 }
 
-func sendTerminalNotifierAuthNotification(profile, region, tenancyName, eventURL, message, title, subtitle string) error {
+func sendTerminalNotifierAuthNotification(profile, region, tenancyName, message, title, subtitle string) error {
 	tnPath, err := exec.LookPath("terminal-notifier")
 	if err != nil {
 		return fmt.Errorf("terminal-notifier is required for this branch; install with `brew install terminal-notifier`")
 	}
-	args := buildTerminalNotifierAuthArgs(profile, region, tenancyName, eventURL, message, title, subtitle)
+	args := buildTerminalNotifierAuthArgs(profile, region, tenancyName, message, title, subtitle)
 	if out, err := exec.Command(tnPath, args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("terminal-notifier failed: %v: %s", err, strings.TrimSpace(string(out)))
 	}
