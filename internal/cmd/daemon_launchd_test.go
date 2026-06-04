@@ -196,13 +196,31 @@ func TestRenderOCIAccessNotifierTemplates(t *testing.T) {
 	swift := renderOCIAccessNotifierSwift()
 	for _, want := range []string{
 		`OCI Access Required`,
-		`NSUserNotificationCenter.default`,
-		`actionButtonTitle = "Re-auth now"`,
+		`UNUserNotificationCenter.current()`,
+		`UNNotificationAction(`,
+		`title: "Re-auth now"`,
+		`UNNotificationDefaultActionIdentifier`,
+		`presentAuthPrompt()`,
+		`NSAlert()`,
+		`alert.addButton(withTitle: "Re-auth now")`,
+		`resolveOCIPath()`,
+		`"/opt/homebrew/bin/oci"`,
 		`"session", "authenticate"`,
 		`"--profile-name"`,
 	} {
 		if !strings.Contains(swift, want) {
 			t.Fatalf("expected Swift template to contain %q", want)
+		}
+	}
+	for _, unwanted := range []string{
+		`otherButtonTitle`,
+		`NSUserNotification`,
+		`hammerspoon://`,
+		`appIcon`,
+		`contentImage`,
+	} {
+		if strings.Contains(swift, unwanted) {
+			t.Fatalf("expected Swift template not to contain %q", unwanted)
 		}
 	}
 	plist := renderOCIAccessInfoPlist()
@@ -223,6 +241,16 @@ func TestBuildCustomAppAuthArgs(t *testing.T) {
 	want := "--profile OPS --context dev --reason wake auth failed --region us-chicago-1 --tenancy-name tenancy"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestSendCustomAppAuthNotificationUsesNewAppInstance(t *testing.T) {
+	source, err := os.ReadFile("daemon.go")
+	if err != nil {
+		t.Fatalf("read daemon.go: %v", err)
+	}
+	if !strings.Contains(string(source), `[]string{"-n", "-g", "-a", appPath, "--args"}`) {
+		t.Fatalf("custom app launcher should force a new app instance so auth args are not dropped")
 	}
 }
 

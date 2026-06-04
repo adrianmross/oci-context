@@ -823,6 +823,9 @@ func runDaemonNotifierAppInstall(out io.Writer, appPath string) error {
 	if err := os.Chmod(binaryPath, 0o755); err != nil {
 		return err
 	}
+	if outBytes, err := exec.Command("codesign", "--force", "--sign", "-", "--identifier", "com.adrianmross.oci-access", appPath).CombinedOutput(); err != nil {
+		return fmt.Errorf("codesign failed: %v: %s", err, strings.TrimSpace(string(outBytes)))
+	}
 	fmt.Fprintf(out, "Installed OCI Access notifier app: %s\n", appPath)
 	return nil
 }
@@ -1716,7 +1719,7 @@ func sendCustomAppAuthNotification(profile, region, contextName, reason, tenancy
 	if appPath == "" {
 		return fmt.Errorf("OCI Access.app is required for this branch; install with `oci-context daemon install notifier-app`")
 	}
-	args := append([]string{"-g", "-a", appPath, "--args"}, buildCustomAppAuthArgs(profile, region, contextName, reason, tenancyName)...)
+	args := append([]string{"-n", "-g", "-a", appPath, "--args"}, buildCustomAppAuthArgs(profile, region, contextName, reason, tenancyName)...)
 	if out, err := exec.Command("open", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to open OCI Access.app: %v: %s", err, strings.TrimSpace(string(out)))
 	}
