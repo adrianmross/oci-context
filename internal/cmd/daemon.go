@@ -374,6 +374,7 @@ func newDaemonInstallCmd() *cobra.Command {
 	cmd.AddCommand(newDaemonInstallLaunchdCmd())
 	cmd.AddCommand(newDaemonInstallSleepwatcherCmd())
 	cmd.AddCommand(newDaemonInstallHammerspoonCmd())
+	cmd.AddCommand(newDaemonInstallNotifierAppCmd())
 	cmd.AddCommand(newDaemonInstallSystemdCmd())
 	return cmd
 }
@@ -699,6 +700,19 @@ func newDaemonInstallHammerspoonCmd() *cobra.Command {
 	return cmd
 }
 
+func newDaemonInstallNotifierAppCmd() *cobra.Command {
+	var appPath string
+	cmd := &cobra.Command{
+		Use:   "notifier-app",
+		Short: "Build and install the OCI Access notification helper app (macOS)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDaemonNotifierAppInstall(cmd.OutOrStdout(), appPath)
+		},
+	}
+	cmd.Flags().StringVar(&appPath, "app-path", "", "Path for OCI Access.app (default ~/Applications/OCI Access.app)")
+	return cmd
+}
+
 func newDaemonInstallSystemdCmd() *cobra.Command {
 	var cfgPath string
 	var unitPath string
@@ -770,6 +784,50 @@ func newDaemonInstallSystemdCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&refreshInterval, "refresh-interval", 15*time.Minute, "How often to refresh security-token auth")
 	cmd.Flags().BoolVar(&loadNow, "load", true, "Reload and enable/start systemd user service")
 	return cmd
+}
+
+func runDaemonNotifierAppInstall(out io.Writer, appPath string) error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("notifier-app install is only supported on macOS")
+	}
+	if _, err := exec.LookPath("swiftc"); err != nil {
+		return fmt.Errorf("swiftc is required to build OCI Access.app: %w", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	if appPath == "" {
+		appPath = filepath.Join(home, "Applications", "OCI Access.app")
+	}
+	contents := filepath.Join(appPath, "Contents")
+	macos := filepath.Join(contents, "MacOS")
+	resources := filepath.Join(contents, "Resources")
+	if err := os.MkdirAll(macos, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(resources, 0o755); err != nil {
+		return err
+	}
+	sourcePath := filepath.Join(resources, "main.swift")
+	if err := os.WriteFile(sourcePath, []byte(renderOCIAccessNotifierSwift()), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(contents, "Info.plist"), []byte(renderOCIAccessInfoPlist()), 0o644); err != nil {
+		return err
+	}
+	binaryPath := filepath.Join(macos, "OCI Access")
+	if outBytes, err := exec.Command("swiftc", sourcePath, "-o", binaryPath).CombinedOutput(); err != nil {
+		return fmt.Errorf("swiftc failed: %v: %s", err, strings.TrimSpace(string(outBytes)))
+	}
+	if err := os.Chmod(binaryPath, 0o755); err != nil {
+		return err
+	}
+	if outBytes, err := exec.Command("codesign", "--force", "--sign", "-", "--identifier", "com.adrianmross.oci-access", appPath).CombinedOutput(); err != nil {
+		return fmt.Errorf("codesign failed: %v: %s", err, strings.TrimSpace(string(outBytes)))
+	}
+	fmt.Fprintf(out, "Installed OCI Access notifier app: %s\n", appPath)
+	return nil
 }
 
 func newDaemonServeCmd() *cobra.Command {
@@ -1202,19 +1260,13 @@ func newNotifyCmd(use, short string) *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), eventURL)
 				return nil
 			}
-			if out, err := runCombinedOutput(cmd.OutOrStdout(), "open", "-g", eventURL); err != nil {
-				return fmt.Errorf("failed to trigger hammerspoon event: %v: %s", err, strings.TrimSpace(string(out)))
+			if err := sendCustomAppAuthNotification(prof, reg, ctxName, reason, tenancy); err != nil {
+				return err
 			}
 			if nativeNotify {
-				msg := fmt.Sprintf("Auth check for %s (%s)", ctxName, prof)
-				if strings.TrimSpace(reason) != "" {
-					msg = fmt.Sprintf("%s\n%s", msg, reason)
-				}
-				if err := sendNativeAuthNotification(eventURL, msg, "oci-context", "Remote trigger"); err != nil {
-					return fmt.Errorf("hammerspoon event sent but native notification failed: %w", err)
-				}
+				fmt.Fprintln(cmd.OutOrStdout(), "native notify is implicit in OCI Access.app backend")
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Triggered Hammerspoon notification for context=%s profile=%s region=%s\n", ctxName, prof, reg)
+			fmt.Fprintf(cmd.OutOrStdout(), "Triggered OCI Access.app notification for context=%s profile=%s region=%s\n", ctxName, prof, reg)
 			return nil
 		},
 	}
@@ -1635,6 +1687,45 @@ func buildTerminalNotifierArgs(eventURL, message, title, subtitle string) []stri
 		"-message", message,
 		"-open", eventURL,
 	}
+}
+
+func buildCustomAppAuthArgs(profile, region, contextName, reason, tenancyName string) []string {
+	args := []string{"--profile", profile, "--context", contextName, "--reason", reason}
+	if strings.TrimSpace(region) != "" {
+		args = append(args, "--region", region)
+	}
+	if strings.TrimSpace(tenancyName) != "" {
+		args = append(args, "--tenancy-name", tenancyName)
+	}
+	return args
+}
+
+func defaultCustomNotifierAppPath() string {
+	home, err := os.UserHomeDir()
+	if err == nil {
+		candidate := filepath.Join(home, "Applications", "OCI Access.app")
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate
+		}
+	}
+	if _, err := os.Stat("/Applications/OCI Access.app"); err == nil {
+		return "/Applications/OCI Access.app"
+	}
+	return ""
+}
+
+func sendCustomAppAuthNotification(profile, region, contextName, reason, tenancyName string) error {
+	appPath := defaultCustomNotifierAppPath()
+	if appPath == "" {
+		return fmt.Errorf("OCI Access.app is required for this branch; install with `oci-context daemon install notifier-app`")
+	}
+	binaryPath := filepath.Join(appPath, "Contents", "MacOS", "OCI Access")
+	args := buildCustomAppAuthArgs(profile, region, contextName, reason, tenancyName)
+	cmd := exec.Command(binaryPath, args...)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to open OCI Access.app: %w", err)
+	}
+	return nil
 }
 
 func sendNativeAuthNotification(eventURL, message, title, subtitle string) error {

@@ -1,0 +1,145 @@
+import Cocoa
+import AudioToolbox
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var profile = "DEFAULT"
+    private var region = ""
+    private var contextName = "current"
+    private var reason = "Authentication required"
+    private var tenancyName = ""
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        parseArgs(CommandLine.arguments)
+        presentAuthPrompt()
+    }
+
+    private func presentAuthPrompt() {
+        NSApp.activate(ignoringOtherApps: true)
+        playAlertSound()
+
+        let alert = NSAlert()
+        alert.messageText = "OCI Access Required"
+        alert.informativeText = "Auth unhealthy for \(contextName) (\(profile))\n\(reason)"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Re-auth now")
+        alert.addButton(withTitle: "Dismiss")
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            startBrowserAuthentication()
+        } else {
+            NSApp.terminate(nil)
+        }
+    }
+
+    private func playAlertSound() {
+        AudioServicesPlaySystemSound(1005)
+    }
+
+    private func parseArgs(_ args: [String]) {
+        var index = 1
+        while index < args.count {
+            let key = args[index]
+            let value = index + 1 < args.count ? args[index + 1] : ""
+            switch key {
+            case "--profile":
+                profile = value.isEmpty ? "DEFAULT" : value
+                index += 2
+            case "--region":
+                region = value
+                index += 2
+            case "--context":
+                contextName = value.isEmpty ? "current" : value
+                index += 2
+            case "--reason":
+                reason = value.isEmpty ? "Authentication required" : value
+                index += 2
+            case "--tenancy-name":
+                tenancyName = value
+                index += 2
+            default:
+                index += 1
+            }
+        }
+    }
+
+    private func startBrowserAuthentication() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: resolvedOCIContextCommand())
+        let args = ["auth", "login", "--context", contextName]
+        task.arguments = args
+        task.environment = [
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": NSHomeDirectory()
+        ]
+        let outputPipe = Pipe()
+        task.standardOutput = outputPipe
+        task.standardError = outputPipe
+        do {
+            try task.run()
+            appendLog("started oci-context auth: \(resolvedOCIContextCommand()) \(args.joined(separator: " "))")
+            DispatchQueue.global(qos: .utility).async {
+                task.waitUntilExit()
+                let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+                if task.terminationStatus == 0 {
+                    self.appendLog("oci-context auth completed for context \(self.contextName)")
+                    DispatchQueue.main.async {
+                        NSApp.terminate(nil)
+                    }
+                } else {
+                    self.appendLog("oci-context auth failed for context \(self.contextName): \(output)")
+                    DispatchQueue.main.async {
+                        self.presentAuthenticationError(output)
+                    }
+                }
+            }
+        } catch {
+            appendLog("failed to start oci-context auth: \(error)")
+            presentAuthenticationError("\(error)")
+        }
+    }
+
+    private func presentAuthenticationError(_ output: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        playAlertSound()
+        let alert = NSAlert()
+        alert.messageText = "OCI auth did not start"
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        alert.informativeText = trimmed.isEmpty ? "Check ~/.oci-context/oci-access.log for details." : trimmed
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+        NSApp.terminate(nil)
+    }
+
+    private func resolvedOCIContextCommand() -> String {
+        for path in ["/opt/homebrew/bin/oci-context", "/usr/local/bin/oci-context"] {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+        return "oci-context"
+    }
+
+    private func appendLog(_ message: String) {
+        let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".oci-context")
+        let log = dir.appendingPathComponent("oci-access.log")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let line = "\(Date()) \(message)\n"
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: log.path),
+               let handle = try? FileHandle(forWritingTo: log) {
+                try? handle.seekToEnd()
+                try? handle.write(contentsOf: data)
+                try? handle.close()
+            } else {
+                try? data.write(to: log)
+            }
+        }
+    }
+}
+
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()
