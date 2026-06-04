@@ -192,6 +192,33 @@ func TestBuildTerminalNotifierArgs(t *testing.T) {
 	}
 }
 
+func TestBuildTerminalNotifierAuthArgs(t *testing.T) {
+	args := buildTerminalNotifierAuthArgs(
+		"OPS",
+		"us-chicago-1",
+		"tenancy",
+		"body",
+		"OCI Access Required",
+		"dev",
+	)
+	got := strings.Join(args, " ")
+	for _, want := range []string{
+		"-title OCI Access Required",
+		"-subtitle dev",
+		"-message body",
+		"-group oci-context-auth-dev",
+		"-sound default",
+		"-execute oci session authenticate --profile-name OPS --region us-chicago-1 --tenancy-name tenancy",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in args %q", want, got)
+		}
+	}
+	if strings.Contains(got, "hammerspoon://") {
+		t.Fatalf("terminal-notifier auth args should not redirect through Hammerspoon: %q", got)
+	}
+}
+
 func TestRenderHammerspoonModule_LuaSyntax(t *testing.T) {
 	luacPath, err := exec.LookPath("luac")
 	if err != nil {
