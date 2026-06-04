@@ -192,6 +192,65 @@ func TestBuildTerminalNotifierArgs(t *testing.T) {
 	}
 }
 
+func TestBuildAlerterAuthArgs(t *testing.T) {
+	args := buildAlerterAuthArgs("body", "OCI Access Required", "dev")
+	got := strings.Join(args, " ")
+	for _, want := range []string{
+		"--title OCI Access Required",
+		"--subtitle dev",
+		"--message body",
+		"--actions Re-auth now",
+		"--close-label Dismiss",
+		"--sound default",
+		"--timeout 0",
+		"--group oci-context-auth-dev",
+		"--ignore-dnd",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in args %q", want, got)
+		}
+	}
+	if strings.Contains(got, "hammerspoon://") {
+		t.Fatalf("alerter auth args should not redirect through Hammerspoon: %q", got)
+	}
+	for _, unwanted := range []string{"--app-icon", "--content-image"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("alerter auth args should not include custom image flag %q: %q", unwanted, got)
+		}
+	}
+}
+
+func TestBuildOCIAuthenticateArgs(t *testing.T) {
+	args := buildOCIAuthenticateArgs("OPS", "us-chicago-1", "tenancy")
+	got := strings.Join(args, " ")
+	want := "session authenticate --profile-name OPS --region us-chicago-1 --tenancy-name tenancy"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestShouldRunOCIAuthForAlerterResult(t *testing.T) {
+	for _, result := range []string{
+		"Re-auth now",
+		"@ACTIONCLICKED",
+		"@CONTENTCLICKED",
+	} {
+		if !shouldRunOCIAuthForAlerterResult(result) {
+			t.Fatalf("expected %q to trigger OCI auth", result)
+		}
+	}
+	for _, result := range []string{
+		"@TIMEOUT",
+		"@CLOSED",
+		"Dismiss",
+		"",
+	} {
+		if shouldRunOCIAuthForAlerterResult(result) {
+			t.Fatalf("expected %q not to trigger OCI auth", result)
+		}
+	}
+}
+
 func TestRenderHammerspoonModule_LuaSyntax(t *testing.T) {
 	luacPath, err := exec.LookPath("luac")
 	if err != nil {
