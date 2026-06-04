@@ -52,9 +52,11 @@ local function ociNotify(callback, attrs)
   attrs = attrs or {}
   attrs.title = attrs.title or "OCI Access"
   attrs.subTitle = attrs.subTitle or "Session authentication"
-  attrs.setIdImage = attrs.setIdImage or notificationIcon
   attrs.soundName = attrs.soundName or "default"
-  return hs.notify.new(callback, attrs)
+  attrs.contentImage = attrs.contentImage or notificationIcon
+  local n = hs.notify.new(callback, attrs)
+  n:setIdImage(notificationIcon, false)
+  return n
 end
 
 local function runOciAuthenticate(profile, region, contextName, tenancyName)
@@ -136,7 +138,9 @@ local function showAuthNeededNotification(profile, contextName, reason, region, 
     informativeText = msg,
     actionButtonTitle = "Re-auth now",
     hasActionButton = true,
-    autoWithdraw = true,
+    autoWithdraw = false,
+    withdrawAfter = 0,
+    alwaysPresent = true,
   })
 
   n:send()
