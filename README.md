@@ -97,10 +97,9 @@ Tools such as `ochain` can use that as a credential-command bridge:
 }
 ```
 
-Token services are generic OAuth device-flow profiles. The shipped `obp`
-service is only a named profile that reads the OChain-provided target metadata.
-Define additional services in config when another tool should use a different
-issuer, client, or scope:
+Token services are generic OAuth device-flow definitions. The shipped `obp`
+service reads the OChain-provided target metadata. Define additional services in
+config when another tool should use a different issuer, client, or scope:
 
 ```yaml
 token_services:
