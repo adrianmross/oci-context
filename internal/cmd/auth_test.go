@@ -30,7 +30,7 @@ func TestAuthCapabilityForMethod(t *testing.T) {
 	}
 }
 
-func TestAuthTokenOBPDeviceFlowCachesAndEmitsJSON(t *testing.T) {
+func TestAuthTokenOAuthDeviceServiceCachesAndEmitsJSON(t *testing.T) {
 	var tokenRequests int
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +65,13 @@ func TestAuthTokenOBPDeviceFlowCachesAndEmitsJSON(t *testing.T) {
 			OCIConfigPath: "/tmp/oci",
 			SocketPath:    t.TempDir() + "/daemon.sock",
 		},
+		TokenServices: []config.TokenService{{
+			Name:     "chaincode-obp",
+			Type:     config.TokenServiceTypeOAuthDevice,
+			Issuer:   server.URL,
+			ClientID: "obp-native",
+			Scope:    "https://obp.example.com/restproxy",
+		}},
 		Contexts: []config.Context{{
 			Name:        "dev",
 			Profile:     "DEFAULT",
@@ -88,9 +95,7 @@ func TestAuthTokenOBPDeviceFlowCachesAndEmitsJSON(t *testing.T) {
 	cmd.SetArgs([]string{
 		"auth", "token",
 		"--config", cfgPath,
-		"--issuer", server.URL,
-		"--client-id", "obp-native",
-		"--scope", "https://obp.example.com/restproxy",
+		"--service", "chaincode-obp",
 		"--no-browser",
 		"--format", "json",
 	})
@@ -100,13 +105,14 @@ func TestAuthTokenOBPDeviceFlowCachesAndEmitsJSON(t *testing.T) {
 
 	var got struct {
 		AccessToken string `json:"access_token"`
+		Service     string `json:"service"`
 		Context     string `json:"context"`
 		Profile     string `json:"profile"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal token json: %v\n%s", err, out.String())
 	}
-	if got.AccessToken != "obp-token" || got.Context != "dev" || got.Profile != "DEFAULT" {
+	if got.AccessToken != "obp-token" || got.Service != "chaincode-obp" || got.Context != "dev" || got.Profile != "DEFAULT" {
 		t.Fatalf("unexpected token payload: %+v", got)
 	}
 	if !strings.Contains(errOut.String(), "ABCD-EFGH") {
@@ -121,9 +127,7 @@ func TestAuthTokenOBPDeviceFlowCachesAndEmitsJSON(t *testing.T) {
 	cmd.SetArgs([]string{
 		"auth", "token",
 		"--config", cfgPath,
-		"--issuer", server.URL,
-		"--client-id", "obp-native",
-		"--scope", "https://obp.example.com/restproxy",
+		"--service", "chaincode-obp",
 		"--no-login",
 	})
 	if err := cmd.Execute(); err != nil {

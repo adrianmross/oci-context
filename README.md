@@ -84,7 +84,7 @@ Emit an OBP/OABCS token for another command without persisting it in that
 tool's config:
 
 ```bash
-oci-context auth token --audience obp --format raw
+oci-context auth token --service obp --format raw
 ```
 
 Tools such as `ochain` can use that as a credential-command bridge:
@@ -92,9 +92,21 @@ Tools such as `ochain` can use that as a credential-command bridge:
 ```json
 {
   "auth": {
-    "tokenCommand": "oci-context auth token --audience obp --format raw"
+    "tokenCommand": "oci-context auth token --service obp --format raw"
   }
 }
+```
+
+Token services are generic OAuth device-flow profiles. Define additional
+services in config when a tool should use a different issuer, client, or scope:
+
+```yaml
+token_services:
+  - name: obp
+    type: oauth_device
+    issuer_env: OCHAIN_OBP_AUTH_ISSUER
+    client_id: obp
+    scope_env: OCHAIN_OBP_AUTH_SCOPE
 ```
 
 For the common Red Wiz OABCS target, select the OCI context for `oabcs1` in the

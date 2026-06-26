@@ -44,7 +44,7 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
   `oci-context auth ensure --output json`, and
   `oci-context auth show --output json`.
 - For credential-command handoffs, prefer
-  `oci-context auth token --audience obp --format raw`; stdout contains the
+  `oci-context auth token --service obp --format raw`; stdout contains the
   bearer token and must be treated as secret material.
 - Treat JSON field names as stable contract. Prefer additive fields and document
   any breaking output change before relying on it in workflows or scripts.

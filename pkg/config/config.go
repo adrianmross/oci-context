@@ -14,9 +14,10 @@ import (
 
 // Config represents the persisted state for oci-context.
 type Config struct {
-	Options        Options   `yaml:"options" json:"options"`
-	Contexts       []Context `yaml:"contexts" json:"contexts"`
-	CurrentContext string    `yaml:"current_context" json:"current_context"`
+	Options        Options        `yaml:"options" json:"options"`
+	Contexts       []Context      `yaml:"contexts" json:"contexts"`
+	TokenServices  []TokenService `yaml:"token_services,omitempty" json:"token_services,omitempty"`
+	CurrentContext string         `yaml:"current_context" json:"current_context"`
 }
 
 // Options holds global settings.
@@ -38,6 +39,24 @@ type Context struct {
 	User            string `yaml:"user" json:"user"`
 	Notes           string `yaml:"notes" json:"notes"`
 }
+
+// TokenService describes a named token provider for command handoffs.
+type TokenService struct {
+	Name             string `yaml:"name" json:"name"`
+	Type             string `yaml:"type,omitempty" json:"type,omitempty"`
+	Issuer           string `yaml:"issuer,omitempty" json:"issuer,omitempty"`
+	IssuerEnv        string `yaml:"issuer_env,omitempty" json:"issuer_env,omitempty"`
+	ClientID         string `yaml:"client_id,omitempty" json:"client_id,omitempty"`
+	ClientIDEnv      string `yaml:"client_id_env,omitempty" json:"client_id_env,omitempty"`
+	Scope            string `yaml:"scope,omitempty" json:"scope,omitempty"`
+	ScopeEnv         string `yaml:"scope_env,omitempty" json:"scope_env,omitempty"`
+	TokenEndpoint    string `yaml:"token_endpoint,omitempty" json:"token_endpoint,omitempty"`
+	TokenEndpointEnv string `yaml:"token_endpoint_env,omitempty" json:"token_endpoint_env,omitempty"`
+	DeviceEndpoint   string `yaml:"device_endpoint,omitempty" json:"device_endpoint,omitempty"`
+	DeviceEnv        string `yaml:"device_endpoint_env,omitempty" json:"device_endpoint_env,omitempty"`
+}
+
+const TokenServiceTypeOAuthDevice = "oauth_device"
 
 var (
 	ErrContextNotFound = errors.New("context not found")
