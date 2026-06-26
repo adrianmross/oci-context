@@ -75,12 +75,15 @@ func TestDefaultConfigIncludesOBPTokenService(t *testing.T) {
 		t.Fatalf("expected default token service, got %+v", cfg.TokenServices)
 	}
 	service := cfg.TokenServices[0]
-	if service.Name != "obp" || service.Type != TokenServiceTypeOAuthDevice || service.ClientID != "obp" {
+	if service.Name != "obp" || service.Type != TokenServiceTypeOAuth || service.ClientID != "obp" {
 		t.Fatalf("unexpected default service: %+v", service)
 	}
 	if !containsString(service.IssuerEnvs, "OCHAIN_OBP_AUTH_ISSUER") ||
 		!containsString(service.ScopeEnvs, "OCHAIN_OBP_AUTH_SCOPE") ||
-		!containsString(service.TokenEndpointEnvs, "OCHAIN_OBP_AUTH_TOKEN_ENDPOINT") {
+		!containsString(service.TokenEndpointEnvs, "OCHAIN_OBP_AUTH_TOKEN_ENDPOINT") ||
+		!containsString(service.ClientSecretEnvs, "OCHAIN_OBP_AUTH_CLIENT_SECRET") ||
+		service.AuthorizationEndpointEnv != "OCHAIN_OBP_AUTH_AUTHORIZATION_ENDPOINT" ||
+		service.RedirectURLEnv != "OCHAIN_OBP_AUTH_REDIRECT_URL" {
 		t.Fatalf("default service is missing expected env bindings: %+v", service)
 	}
 }
