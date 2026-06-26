@@ -80,6 +80,30 @@ Make sure auth is ready before automation:
 oci-context auth ensure --output json
 ```
 
+Emit an OBP/OABCS token for another command without persisting it in that
+tool's config:
+
+```bash
+oci-context auth token --audience obp --format raw
+```
+
+Tools such as `ochain` can use that as a credential-command bridge:
+
+```json
+{
+  "auth": {
+    "tokenCommand": "oci-context auth token --audience obp --format raw"
+  }
+}
+```
+
+For the common Red Wiz OABCS target, select the OCI context for `oabcs1` in the
+default domain and configure the chaincode deploy environment for
+`pmdemo/adrian/did` on channel `testnet`. The token command reads
+`OCHAIN_OBP_AUTH_ISSUER`, `OCHAIN_OBP_AUTH_CLIENT_ID`, and
+`OCHAIN_OBP_AUTH_SCOPE` from the caller environment, so OChain can resolve the
+target and oci-context can own the browser/device login.
+
 Inspect local metadata without calling OCI:
 
 ```bash

@@ -4,7 +4,7 @@ import "testing"
 
 func TestAuthPersistentFlagsAvailableOnSubcommands(t *testing.T) {
 	cmd := newAuthCmd()
-	for _, sub := range []string{"show", "validate", "set", "set-user", "login", "refresh", "setup", "methods", "ensure"} {
+	for _, sub := range []string{"show", "validate", "set", "set-user", "login", "refresh", "setup", "methods", "ensure", "token"} {
 		subcmd, _, err := cmd.Find([]string{sub})
 		if err != nil {
 			t.Fatalf("find subcommand %s: %v", sub, err)
