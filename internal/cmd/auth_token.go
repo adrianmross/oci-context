@@ -150,6 +150,9 @@ type tokenServiceRequest struct {
 func resolveTokenServiceRequest(cfg config.Config, opts tokenServiceOptions) (tokenServiceRequest, error) {
 	serviceName := firstNonEmpty(opts.Service, opts.Audience, "obp")
 	serviceCfg, found := findTokenService(cfg, serviceName)
+	if !found {
+		serviceCfg, found = defaultTokenService(serviceName)
+	}
 	if !found && serviceName != "obp" && opts.Issuer == "" && opts.TokenEndpoint == "" {
 		return tokenServiceRequest{}, fmt.Errorf("token service %q is not configured", serviceName)
 	}
@@ -163,32 +166,32 @@ func resolveTokenServiceRequest(cfg config.Config, opts tokenServiceOptions) (to
 		Issuer: firstNonEmpty(
 			opts.Issuer,
 			envValue(serviceCfg.IssuerEnv),
+			envValues(serviceCfg.IssuerEnvs...),
 			serviceCfg.Issuer,
-			serviceDefault(serviceName, "issuer"),
 		),
 		ClientID: firstNonEmpty(
 			opts.ClientID,
 			envValue(serviceCfg.ClientIDEnv),
+			envValues(serviceCfg.ClientIDEnvs...),
 			serviceCfg.ClientID,
-			serviceDefault(serviceName, "client_id"),
 		),
 		Scope: firstNonEmpty(
 			opts.Scope,
 			envValue(serviceCfg.ScopeEnv),
+			envValues(serviceCfg.ScopeEnvs...),
 			serviceCfg.Scope,
-			serviceDefault(serviceName, "scope"),
 		),
 		TokenEndpoint: firstNonEmpty(
 			opts.TokenEndpoint,
 			envValue(serviceCfg.TokenEndpointEnv),
+			envValues(serviceCfg.TokenEndpointEnvs...),
 			serviceCfg.TokenEndpoint,
-			serviceDefault(serviceName, "token_endpoint"),
 		),
 		DeviceEndpoint: firstNonEmpty(
 			opts.DeviceEndpoint,
 			envValue(serviceCfg.DeviceEnv),
+			envValues(serviceCfg.DeviceEnvs...),
 			serviceCfg.DeviceEndpoint,
-			serviceDefault(serviceName, "device_endpoint"),
 		),
 	}
 	if request.ClientID == "" {
@@ -206,35 +209,13 @@ func findTokenService(cfg config.Config, name string) (config.TokenService, bool
 	return config.TokenService{}, false
 }
 
-func serviceDefault(service, field string) string {
-	if service != "obp" {
-		return ""
+func defaultTokenService(name string) (config.TokenService, bool) {
+	for _, service := range config.DefaultTokenServices() {
+		if service.Name == name {
+			return service, true
+		}
 	}
-	switch field {
-	case "issuer":
-		return firstNonEmpty(
-			os.Getenv("OCHAIN_OBP_AUTH_ISSUER"),
-			os.Getenv("OBP_OAUTH2_ISSUER"),
-			os.Getenv("OBP_OAUTH2_IDCS_ISSUER"),
-		)
-	case "client_id":
-		return firstNonEmpty(os.Getenv("OCHAIN_OBP_AUTH_CLIENT_ID"), "obp")
-	case "scope":
-		return firstNonEmpty(
-			os.Getenv("OCHAIN_OBP_AUTH_SCOPE"),
-			os.Getenv("OCHAIN_OBP_PLATFORM"),
-			os.Getenv("OBP_PLATFORM"),
-		)
-	case "token_endpoint":
-		return firstNonEmpty(
-			os.Getenv("OCHAIN_OBP_AUTH_TOKEN_ENDPOINT"),
-			os.Getenv("OBP_OAUTH2_TOKEN_ENDPOINT"),
-		)
-	case "device_endpoint":
-		return os.Getenv("OCHAIN_OBP_AUTH_DEVICE_ENDPOINT")
-	default:
-		return ""
-	}
+	return config.TokenService{}, false
 }
 
 func runOAuthDeviceLogin(cmd *cobra.Command, request tokenServiceRequest, openBrowser bool) (authTokenCacheEntry, error) {
@@ -496,4 +477,13 @@ func envValue(name string) string {
 		return ""
 	}
 	return os.Getenv(name)
+}
+
+func envValues(names ...string) string {
+	for _, name := range names {
+		if value := envValue(name); value != "" {
+			return value
+		}
+	}
+	return ""
 }

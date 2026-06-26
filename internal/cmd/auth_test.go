@@ -141,6 +141,54 @@ func TestAuthTokenOAuthDeviceServiceCachesAndEmitsJSON(t *testing.T) {
 	}
 }
 
+func TestAuthTokenDefaultOBPServiceUsesGenericEnvBindings(t *testing.T) {
+	t.Setenv("OCHAIN_OBP_AUTH_ISSUER", "https://issuer.example.com")
+	t.Setenv("OCHAIN_OBP_AUTH_CLIENT_ID", "obp-native")
+	t.Setenv("OCHAIN_OBP_AUTH_SCOPE", "https://obp.example.com/restproxy")
+	t.Setenv("OCHAIN_OBP_AUTH_TOKEN_ENDPOINT", "https://issuer.example.com/token")
+	t.Setenv("OCHAIN_OBP_AUTH_DEVICE_ENDPOINT", "https://issuer.example.com/device")
+
+	request, err := resolveTokenServiceRequest(config.Config{}, tokenServiceOptions{Service: "obp"})
+	if err != nil {
+		t.Fatalf("resolve token service: %v", err)
+	}
+	if request.Service != "obp" || request.Type != config.TokenServiceTypeOAuthDevice {
+		t.Fatalf("unexpected service metadata: %+v", request)
+	}
+	if request.Issuer != "https://issuer.example.com" ||
+		request.ClientID != "obp-native" ||
+		request.Scope != "https://obp.example.com/restproxy" ||
+		request.TokenEndpoint != "https://issuer.example.com/token" ||
+		request.DeviceEndpoint != "https://issuer.example.com/device" {
+		t.Fatalf("unexpected request: %+v", request)
+	}
+}
+
+func TestAuthTokenConfiguredServiceUsesGenericEnvLists(t *testing.T) {
+	t.Setenv("CHAINCODE_ISSUER", "https://issuer.example.com")
+	t.Setenv("CHAINCODE_SCOPE", "https://obp.example.com/restproxy")
+
+	cfg := config.Config{
+		TokenServices: []config.TokenService{{
+			Name:       "chaincode",
+			Type:       config.TokenServiceTypeOAuthDevice,
+			IssuerEnvs: []string{"CHAINCODE_ISSUER"},
+			ClientID:   "chaincode-client",
+			ScopeEnvs:  []string{"CHAINCODE_SCOPE"},
+		}},
+	}
+
+	request, err := resolveTokenServiceRequest(cfg, tokenServiceOptions{Service: "chaincode"})
+	if err != nil {
+		t.Fatalf("resolve token service: %v", err)
+	}
+	if request.Issuer != "https://issuer.example.com" ||
+		request.ClientID != "chaincode-client" ||
+		request.Scope != "https://obp.example.com/restproxy" {
+		t.Fatalf("unexpected request: %+v", request)
+	}
+}
+
 func TestAuthTokenNoInteractiveRequiresCachedToken(t *testing.T) {
 	cfg := config.Config{
 		Options: config.Options{

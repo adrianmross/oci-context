@@ -97,16 +97,23 @@ Tools such as `ochain` can use that as a credential-command bridge:
 }
 ```
 
-Token services are generic OAuth device-flow profiles. Define additional
-services in config when a tool should use a different issuer, client, or scope:
+Token services are generic OAuth device-flow profiles. The shipped `obp`
+service is only a named profile that reads the OChain-provided target metadata.
+Define additional services in config when another tool should use a different
+issuer, client, or scope:
 
 ```yaml
 token_services:
   - name: obp
     type: oauth_device
-    issuer_env: OCHAIN_OBP_AUTH_ISSUER
+    issuer_envs:
+      - OCHAIN_OBP_AUTH_ISSUER
+      - OBP_OAUTH2_ISSUER
     client_id: obp
-    scope_env: OCHAIN_OBP_AUTH_SCOPE
+    scope_envs:
+      - OCHAIN_OBP_AUTH_SCOPE
+      - OCHAIN_OBP_PLATFORM
+    token_endpoint_env: OCHAIN_OBP_AUTH_TOKEN_ENDPOINT
 ```
 
 For the common Red Wiz OABCS target, select the OCI context for `oabcs1` in the
