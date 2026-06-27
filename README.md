@@ -130,8 +130,8 @@ default domain and configure the chaincode deploy environment for
 target and oci-context can own the browser login.
 
 For Oracle Identity Cloud Service domains that do not expose a Device Code
-endpoint, configure the IDCS application with Authorization Code and a loopback
-redirect URL, then force that flow locally:
+endpoint, configure a CLI-capable IDCS application with Authorization Code and
+a loopback redirect URL, then force that flow locally:
 
 ```bash
 export OCHAIN_OBP_AUTH_REDIRECT_URL=http://127.0.0.1:8180/callback
@@ -147,6 +147,17 @@ client requires a secret, provide it through `OCHAIN_OBP_AUTH_CLIENT_SECRET` or
 service config rather than storing it in the downstream tool. stdout contains
 the bearer token and must be treated as secret material; browser instructions
 are written to stderr.
+
+The default OBPCS cloud-service application is normally a CloudGate web
+application. Its redirect is service-owned, for example
+`https://<hostid>/cloudgate/v1/oauth2/callback`. That callback is correct for
+browser access to the OBPCS service, but it is not a CLI callback:
+CloudGate receives and consumes the authorization code, so `oci-context` cannot
+exchange it for a bearer token. For command handoff, use a separate IDCS OAuth
+client that is allowed to request the OBP REST proxy scope and has a registered
+loopback redirect such as `http://127.0.0.1:8180/callback`, or use a trusted
+non-interactive flow such as client credentials or JWT assertion when that is
+the intended identity.
 
 Inspect local metadata without calling OCI:
 

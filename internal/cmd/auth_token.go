@@ -484,11 +484,11 @@ func resolveLoopbackRedirect(rawRedirectURL string) (redirectURL string, listenA
 		return "", "", "", err
 	}
 	if parsed.Scheme != "http" {
-		return "", "", "", fmt.Errorf("authorization-code redirect URL must use http loopback")
+		return "", "", "", fmt.Errorf("authorization-code redirect URL must be an http loopback URL that oci-context can receive; service callbacks such as https://<host>/cloudgate/v1/oauth2/callback are handled by CloudGate and cannot complete CLI token handoff")
 	}
 	host := parsed.Hostname()
 	if host != "127.0.0.1" && host != "localhost" {
-		return "", "", "", fmt.Errorf("authorization-code redirect URL must use localhost or 127.0.0.1")
+		return "", "", "", fmt.Errorf("authorization-code redirect URL must use localhost or 127.0.0.1 so oci-context can receive the authorization code")
 	}
 	port := parsed.Port()
 	if port == "" {
