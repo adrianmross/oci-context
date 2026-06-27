@@ -2,11 +2,17 @@ package cmd
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -307,6 +313,248 @@ func TestAuthTokenOAuthAuthorizationCodeServiceCachesAndRefreshes(t *testing.T) 
 	if tokenRequests != 1 || refreshRequests != 1 {
 		t.Fatalf("expected one code token request and one refresh, got code=%d refresh=%d", tokenRequests, refreshRequests)
 	}
+}
+
+func TestAuthTokenJWTClientCredentialsUsesClientAssertion(t *testing.T) {
+	var tokenRequests int
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		tokenRequests++
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if r.Form.Get("grant_type") != "client_credentials" ||
+			r.Form.Get("client_id") != "obp-sa" ||
+			r.Form.Get("scope") != "https://obp.example.com/restproxy" ||
+			r.Form.Get("client_assertion_type") != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" ||
+			r.Form.Get("client_assertion") != "client.jwt.assertion" {
+			t.Fatalf("unexpected client-credentials form: %v", r.Form)
+		}
+		fmt.Fprint(w, `{"access_token":"service-token","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	cfgPath := writeAuthTokenTestConfig(t)
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"auth", "token",
+		"--config", cfgPath,
+		"--service", "obp",
+		"--flow", "jwt-client-credentials",
+		"--token-endpoint", server.URL + "/token",
+		"--client-id", "obp-sa",
+		"--scope", "https://obp.example.com/restproxy",
+		"--client-assertion", "client.jwt.assertion",
+		"--no-login",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth token: %v", err)
+	}
+	if out.String() != "service-token\n" {
+		t.Fatalf("expected service token, got %q", out.String())
+	}
+	if tokenRequests != 1 {
+		t.Fatalf("expected one token request, got %d", tokenRequests)
+	}
+}
+
+func TestAuthTokenJWTClientCredentialsCanSignClientAssertion(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	keyPath := t.TempDir() + "/client.key"
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		assertion := r.Form.Get("client_assertion")
+		header, claims := decodeUnsignedJWT(t, assertion)
+		if header["alg"] != "RS256" || header["kid"] != "kid-1" {
+			t.Fatalf("unexpected assertion header: %v", header)
+		}
+		if claims["iss"] != "obp-sa" ||
+			claims["sub"] != "obp-sa" ||
+			claims["aud"] != server.URL+"/token" {
+			t.Fatalf("unexpected assertion claims: %v", claims)
+		}
+		fmt.Fprint(w, `{"access_token":"signed-service-token","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	cfgPath := writeAuthTokenTestConfig(t)
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"auth", "token",
+		"--config", cfgPath,
+		"--service", "obp",
+		"--flow", "jwt-client-credentials",
+		"--token-endpoint", server.URL + "/token",
+		"--client-id", "obp-sa",
+		"--scope", "https://obp.example.com/restproxy",
+		"--private-key-file", keyPath,
+		"--key-id", "kid-1",
+		"--no-login",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth token: %v", err)
+	}
+	if out.String() != "signed-service-token\n" {
+		t.Fatalf("expected signed service token, got %q", out.String())
+	}
+}
+
+func TestAuthTokenJWTBearerUsesUserAssertion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if r.Form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:jwt-bearer" ||
+			r.Form.Get("client_id") != "obp-user-rep" ||
+			r.Form.Get("scope") != "https://obp.example.com/restproxy" ||
+			r.Form.Get("assertion") != "user.jwt.assertion" {
+			t.Fatalf("unexpected jwt-bearer form: %v", r.Form)
+		}
+		fmt.Fprint(w, `{"access_token":"user-rep-token","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	cfgPath := writeAuthTokenTestConfig(t)
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"auth", "token",
+		"--config", cfgPath,
+		"--service", "obp",
+		"--flow", "jwt-bearer",
+		"--token-endpoint", server.URL + "/token",
+		"--client-id", "obp-user-rep",
+		"--scope", "https://obp.example.com/restproxy",
+		"--assertion", "user.jwt.assertion",
+		"--no-login",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth token: %v", err)
+	}
+	if out.String() != "user-rep-token\n" {
+		t.Fatalf("expected user representation token, got %q", out.String())
+	}
+}
+
+func TestAuthTokenTokenExchangeUsesSubjectTokenCommand(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if r.Form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:token-exchange" ||
+			r.Form.Get("client_id") != "obp-workload" ||
+			r.Form.Get("scope") != "https://obp.example.com/restproxy" ||
+			r.Form.Get("subject_token_type") != "urn:ietf:params:oauth:token-type:jwt" ||
+			r.Form.Get("requested_token_type") != "urn:ietf:params:oauth:token-type:access_token" ||
+			r.Form.Get("subject_token") != "workload.jwt.token" {
+			t.Fatalf("unexpected token-exchange form: %v", r.Form)
+		}
+		fmt.Fprint(w, `{"access_token":"workload-token","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	cfgPath := writeAuthTokenTestConfig(t)
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"auth", "token",
+		"--config", cfgPath,
+		"--service", "obp",
+		"--flow", "token-exchange",
+		"--token-endpoint", server.URL + "/token",
+		"--client-id", "obp-workload",
+		"--scope", "https://obp.example.com/restproxy",
+		"--subject-token-command", "printf workload.jwt.token",
+		"--requested-token-type", "urn:ietf:params:oauth:token-type:access_token",
+		"--no-login",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth token: %v", err)
+	}
+	if out.String() != "workload-token\n" {
+		t.Fatalf("expected workload token, got %q", out.String())
+	}
+}
+
+func writeAuthTokenTestConfig(t *testing.T) string {
+	t.Helper()
+	cfg := config.Config{
+		Options: config.Options{
+			OCIConfigPath: "/tmp/oci",
+			SocketPath:    t.TempDir() + "/daemon.sock",
+		},
+		Contexts: []config.Context{{
+			Name:        "dev",
+			Profile:     "DEFAULT",
+			AuthMethod:  config.AuthMethodSecurityToken,
+			TenancyOCID: "ocid1.tenancy.oc1..aaaa",
+			Region:      "us-phoenix-1",
+		}},
+		CurrentContext: "dev",
+	}
+	cfgPath := t.TempDir() + "/config.yml"
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	return cfgPath
+}
+
+func decodeUnsignedJWT(t *testing.T, token string) (map[string]string, map[string]any) {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected three JWT parts, got %q", token)
+	}
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("decode JWT header: %v", err)
+	}
+	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode JWT claims: %v", err)
+	}
+	var header map[string]string
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		t.Fatalf("unmarshal JWT header: %v", err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		t.Fatalf("unmarshal JWT claims: %v", err)
+	}
+	return header, claims
 }
 
 func waitForAuthURL(t *testing.T, errOut *bytes.Buffer) string {

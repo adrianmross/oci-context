@@ -69,6 +69,37 @@ type TokenService struct {
 	RedirectURLEnv            string   `yaml:"redirect_url_env,omitempty" json:"redirect_url_env,omitempty"`
 	RedirectURLEnvs           []string `yaml:"redirect_url_envs,omitempty" json:"redirect_url_envs,omitempty"`
 	Flow                      string   `yaml:"flow,omitempty" json:"flow,omitempty"`
+	Assertion                 string   `yaml:"assertion,omitempty" json:"assertion,omitempty"`
+	AssertionEnv              string   `yaml:"assertion_env,omitempty" json:"assertion_env,omitempty"`
+	AssertionEnvs             []string `yaml:"assertion_envs,omitempty" json:"assertion_envs,omitempty"`
+	AssertionFile             string   `yaml:"assertion_file,omitempty" json:"assertion_file,omitempty"`
+	AssertionFileEnv          string   `yaml:"assertion_file_env,omitempty" json:"assertion_file_env,omitempty"`
+	AssertionCommand          string   `yaml:"assertion_command,omitempty" json:"assertion_command,omitempty"`
+	AssertionCommandEnv       string   `yaml:"assertion_command_env,omitempty" json:"assertion_command_env,omitempty"`
+	ClientAssertion           string   `yaml:"client_assertion,omitempty" json:"client_assertion,omitempty"`
+	ClientAssertionEnv        string   `yaml:"client_assertion_env,omitempty" json:"client_assertion_env,omitempty"`
+	ClientAssertionFile       string   `yaml:"client_assertion_file,omitempty" json:"client_assertion_file,omitempty"`
+	ClientAssertionFileEnv    string   `yaml:"client_assertion_file_env,omitempty" json:"client_assertion_file_env,omitempty"`
+	ClientAssertionCommand    string   `yaml:"client_assertion_command,omitempty" json:"client_assertion_command,omitempty"`
+	ClientAssertionCommandEnv string   `yaml:"client_assertion_command_env,omitempty" json:"client_assertion_command_env,omitempty"`
+	SubjectToken              string   `yaml:"subject_token,omitempty" json:"subject_token,omitempty"`
+	SubjectTokenEnv           string   `yaml:"subject_token_env,omitempty" json:"subject_token_env,omitempty"`
+	SubjectTokenFile          string   `yaml:"subject_token_file,omitempty" json:"subject_token_file,omitempty"`
+	SubjectTokenFileEnv       string   `yaml:"subject_token_file_env,omitempty" json:"subject_token_file_env,omitempty"`
+	SubjectTokenCommand       string   `yaml:"subject_token_command,omitempty" json:"subject_token_command,omitempty"`
+	SubjectTokenCommandEnv    string   `yaml:"subject_token_command_env,omitempty" json:"subject_token_command_env,omitempty"`
+	SubjectTokenType          string   `yaml:"subject_token_type,omitempty" json:"subject_token_type,omitempty"`
+	RequestedTokenType        string   `yaml:"requested_token_type,omitempty" json:"requested_token_type,omitempty"`
+	PrivateKeyFile            string   `yaml:"private_key_file,omitempty" json:"private_key_file,omitempty"`
+	PrivateKeyFileEnv         string   `yaml:"private_key_file_env,omitempty" json:"private_key_file_env,omitempty"`
+	KeyID                     string   `yaml:"key_id,omitempty" json:"key_id,omitempty"`
+	KeyIDEnv                  string   `yaml:"key_id_env,omitempty" json:"key_id_env,omitempty"`
+	JWTIssuer                 string   `yaml:"jwt_issuer,omitempty" json:"jwt_issuer,omitempty"`
+	JWTIssuerEnv              string   `yaml:"jwt_issuer_env,omitempty" json:"jwt_issuer_env,omitempty"`
+	JWTSubject                string   `yaml:"jwt_subject,omitempty" json:"jwt_subject,omitempty"`
+	JWTSubjectEnv             string   `yaml:"jwt_subject_env,omitempty" json:"jwt_subject_env,omitempty"`
+	JWTAudience               string   `yaml:"jwt_audience,omitempty" json:"jwt_audience,omitempty"`
+	JWTAudienceEnv            string   `yaml:"jwt_audience_env,omitempty" json:"jwt_audience_env,omitempty"`
 }
 
 const (
@@ -163,9 +194,23 @@ func DefaultOBPTokenService() TokenService {
 			"OCHAIN_OBP_AUTH_TOKEN_ENDPOINT",
 			"OBP_OAUTH2_TOKEN_ENDPOINT",
 		},
-		AuthorizationEndpointEnv: "OCHAIN_OBP_AUTH_AUTHORIZATION_ENDPOINT",
-		DeviceEnv:                "OCHAIN_OBP_AUTH_DEVICE_ENDPOINT",
-		RedirectURLEnv:           "OCHAIN_OBP_AUTH_REDIRECT_URL",
+		AuthorizationEndpointEnv:  "OCHAIN_OBP_AUTH_AUTHORIZATION_ENDPOINT",
+		DeviceEnv:                 "OCHAIN_OBP_AUTH_DEVICE_ENDPOINT",
+		RedirectURLEnv:            "OCHAIN_OBP_AUTH_REDIRECT_URL",
+		AssertionEnv:              "OCHAIN_OBP_AUTH_ASSERTION",
+		AssertionFileEnv:          "OCHAIN_OBP_AUTH_ASSERTION_FILE",
+		AssertionCommandEnv:       "OCHAIN_OBP_AUTH_ASSERTION_COMMAND",
+		ClientAssertionEnv:        "OCHAIN_OBP_AUTH_CLIENT_ASSERTION",
+		ClientAssertionFileEnv:    "OCHAIN_OBP_AUTH_CLIENT_ASSERTION_FILE",
+		ClientAssertionCommandEnv: "OCHAIN_OBP_AUTH_CLIENT_ASSERTION_COMMAND",
+		SubjectTokenEnv:           "OCHAIN_OBP_AUTH_SUBJECT_TOKEN",
+		SubjectTokenFileEnv:       "OCHAIN_OBP_AUTH_SUBJECT_TOKEN_FILE",
+		SubjectTokenCommandEnv:    "OCHAIN_OBP_AUTH_SUBJECT_TOKEN_COMMAND",
+		PrivateKeyFileEnv:         "OCHAIN_OBP_AUTH_PRIVATE_KEY_FILE",
+		KeyIDEnv:                  "OCHAIN_OBP_AUTH_KEY_ID",
+		JWTIssuerEnv:              "OCHAIN_OBP_AUTH_JWT_ISSUER",
+		JWTSubjectEnv:             "OCHAIN_OBP_AUTH_JWT_SUBJECT",
+		JWTAudienceEnv:            "OCHAIN_OBP_AUTH_JWT_AUDIENCE",
 	}
 }
 

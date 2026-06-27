@@ -2,12 +2,19 @@ package cmd
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -75,6 +82,23 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 	var deviceEndpoint string
 	var redirectURL string
 	var flow string
+	var assertion string
+	var assertionFile string
+	var assertionCommand string
+	var clientAssertion string
+	var clientAssertionFile string
+	var clientAssertionCommand string
+	var subjectToken string
+	var subjectTokenFile string
+	var subjectTokenCommand string
+	var subjectTokenType string
+	var requestedTokenType string
+	var privateKeyFile string
+	var keyID string
+	var jwtIssuer string
+	var jwtSubject string
+	var jwtAudience string
+	var jwtExpiresIn time.Duration
 	var format string
 	var noLogin bool
 	var noBrowser bool
@@ -93,17 +117,34 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 			}
 
 			request, err := resolveTokenServiceRequest(cfg, tokenServiceOptions{
-				Service:               service,
-				Audience:              audience,
-				Issuer:                issuer,
-				ClientID:              clientID,
-				ClientSecret:          clientSecret,
-				Scope:                 scope,
-				AuthorizationEndpoint: authorizationEndpoint,
-				TokenEndpoint:         tokenEndpoint,
-				DeviceEndpoint:        deviceEndpoint,
-				RedirectURL:           redirectURL,
-				Flow:                  flow,
+				Service:                service,
+				Audience:               audience,
+				Issuer:                 issuer,
+				ClientID:               clientID,
+				ClientSecret:           clientSecret,
+				Scope:                  scope,
+				AuthorizationEndpoint:  authorizationEndpoint,
+				TokenEndpoint:          tokenEndpoint,
+				DeviceEndpoint:         deviceEndpoint,
+				RedirectURL:            redirectURL,
+				Flow:                   flow,
+				Assertion:              assertion,
+				AssertionFile:          assertionFile,
+				AssertionCommand:       assertionCommand,
+				ClientAssertion:        clientAssertion,
+				ClientAssertionFile:    clientAssertionFile,
+				ClientAssertionCommand: clientAssertionCommand,
+				SubjectToken:           subjectToken,
+				SubjectTokenFile:       subjectTokenFile,
+				SubjectTokenCommand:    subjectTokenCommand,
+				SubjectTokenType:       subjectTokenType,
+				RequestedTokenType:     requestedTokenType,
+				PrivateKeyFile:         privateKeyFile,
+				KeyID:                  keyID,
+				JWTIssuer:              jwtIssuer,
+				JWTSubject:             jwtSubject,
+				JWTAudience:            jwtAudience,
+				JWTExpiresIn:           jwtExpiresIn,
 			})
 			if err != nil {
 				return err
@@ -128,6 +169,16 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 					return printAuthToken(cmd, entry, format, ctx)
 				}
 			}
+			if isNonInteractiveOAuthFlow(normalizeOAuthFlow(request.Flow)) {
+				entry, err = runOAuthNonInteractiveTokenFlow(request)
+				if err != nil {
+					return err
+				}
+				if err := writeAuthTokenCache(cachePath, entry); err != nil {
+					return err
+				}
+				return printAuthToken(cmd, entry, format, ctx)
+			}
 			if noLogin || commandNoInteractive(cmd) {
 				return fmt.Errorf("no cached %s token is available; run `oci-context auth token --service %s` in an interactive shell", request.Service, request.Service)
 			}
@@ -151,7 +202,24 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 	cmd.Flags().StringVar(&tokenEndpoint, "token-endpoint", "", "OAuth token endpoint")
 	cmd.Flags().StringVar(&deviceEndpoint, "device-endpoint", "", "OAuth device authorization endpoint")
 	cmd.Flags().StringVar(&redirectURL, "redirect-url", "", "OAuth authorization-code loopback redirect URL")
-	cmd.Flags().StringVar(&flow, "flow", "auto", "OAuth interactive flow: auto|authorization-code|device")
+	cmd.Flags().StringVar(&flow, "flow", "auto", "OAuth flow: auto|authorization-code|device|client-credentials|jwt-client-credentials|jwt-bearer|token-exchange")
+	cmd.Flags().StringVar(&assertion, "assertion", "", "JWT bearer assertion value; prefer --assertion-file or --assertion-command")
+	cmd.Flags().StringVar(&assertionFile, "assertion-file", "", "File containing a JWT bearer assertion")
+	cmd.Flags().StringVar(&assertionCommand, "assertion-command", "", "Command that prints a JWT bearer assertion")
+	cmd.Flags().StringVar(&clientAssertion, "client-assertion", "", "JWT client assertion value; prefer --client-assertion-file or --client-assertion-command")
+	cmd.Flags().StringVar(&clientAssertionFile, "client-assertion-file", "", "File containing a JWT client assertion")
+	cmd.Flags().StringVar(&clientAssertionCommand, "client-assertion-command", "", "Command that prints a JWT client assertion")
+	cmd.Flags().StringVar(&subjectToken, "subject-token", "", "OAuth token-exchange subject token value")
+	cmd.Flags().StringVar(&subjectTokenFile, "subject-token-file", "", "File containing an OAuth token-exchange subject token")
+	cmd.Flags().StringVar(&subjectTokenCommand, "subject-token-command", "", "Command that prints an OAuth token-exchange subject token")
+	cmd.Flags().StringVar(&subjectTokenType, "subject-token-type", "", "OAuth token-exchange subject token type")
+	cmd.Flags().StringVar(&requestedTokenType, "requested-token-type", "", "OAuth token-exchange requested token type")
+	cmd.Flags().StringVar(&privateKeyFile, "private-key-file", "", "PEM private key file for local JWT signing")
+	cmd.Flags().StringVar(&keyID, "key-id", "", "JWT key id header for local signing")
+	cmd.Flags().StringVar(&jwtIssuer, "jwt-issuer", "", "JWT issuer claim for local signing")
+	cmd.Flags().StringVar(&jwtSubject, "jwt-subject", "", "JWT subject claim for local signing")
+	cmd.Flags().StringVar(&jwtAudience, "jwt-audience", "", "JWT audience claim for local signing; defaults to token endpoint")
+	cmd.Flags().DurationVar(&jwtExpiresIn, "jwt-expires-in", 5*time.Minute, "JWT lifetime for local signing")
 	cmd.Flags().StringVar(&format, "format", "raw", "Output format: raw|json")
 	cmd.Flags().BoolVar(&noLogin, "no-login", false, "Fail instead of starting an interactive login")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the verification URL in a browser")
@@ -159,31 +227,65 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 }
 
 type tokenServiceOptions struct {
-	Service               string
-	Audience              string
-	Issuer                string
-	ClientID              string
-	ClientSecret          string
-	Scope                 string
-	AuthorizationEndpoint string
-	TokenEndpoint         string
-	DeviceEndpoint        string
-	RedirectURL           string
-	Flow                  string
+	Service                string
+	Audience               string
+	Issuer                 string
+	ClientID               string
+	ClientSecret           string
+	Scope                  string
+	AuthorizationEndpoint  string
+	TokenEndpoint          string
+	DeviceEndpoint         string
+	RedirectURL            string
+	Flow                   string
+	Assertion              string
+	AssertionFile          string
+	AssertionCommand       string
+	ClientAssertion        string
+	ClientAssertionFile    string
+	ClientAssertionCommand string
+	SubjectToken           string
+	SubjectTokenFile       string
+	SubjectTokenCommand    string
+	SubjectTokenType       string
+	RequestedTokenType     string
+	PrivateKeyFile         string
+	KeyID                  string
+	JWTIssuer              string
+	JWTSubject             string
+	JWTAudience            string
+	JWTExpiresIn           time.Duration
 }
 
 type tokenServiceRequest struct {
-	Service               string
-	Type                  string
-	Issuer                string
-	ClientID              string
-	ClientSecret          string
-	Scope                 string
-	AuthorizationEndpoint string
-	TokenEndpoint         string
-	DeviceEndpoint        string
-	RedirectURL           string
-	Flow                  string
+	Service                string
+	Type                   string
+	Issuer                 string
+	ClientID               string
+	ClientSecret           string
+	Scope                  string
+	AuthorizationEndpoint  string
+	TokenEndpoint          string
+	DeviceEndpoint         string
+	RedirectURL            string
+	Flow                   string
+	Assertion              string
+	AssertionFile          string
+	AssertionCommand       string
+	ClientAssertion        string
+	ClientAssertionFile    string
+	ClientAssertionCommand string
+	SubjectToken           string
+	SubjectTokenFile       string
+	SubjectTokenCommand    string
+	SubjectTokenType       string
+	RequestedTokenType     string
+	PrivateKeyFile         string
+	KeyID                  string
+	JWTIssuer              string
+	JWTSubject             string
+	JWTAudience            string
+	JWTExpiresIn           time.Duration
 }
 
 func resolveTokenServiceRequest(cfg config.Config, opts tokenServiceOptions) (tokenServiceRequest, error) {
@@ -251,6 +353,80 @@ func resolveTokenServiceRequest(cfg config.Config, opts tokenServiceOptions) (to
 			serviceCfg.RedirectURL,
 		),
 		Flow: firstNonEmpty(opts.Flow, serviceCfg.Flow, "auto"),
+		Assertion: firstNonEmpty(
+			opts.Assertion,
+			envValue(serviceCfg.AssertionEnv),
+			envValues(serviceCfg.AssertionEnvs...),
+			serviceCfg.Assertion,
+		),
+		AssertionFile: firstNonEmpty(
+			opts.AssertionFile,
+			envValue(serviceCfg.AssertionFileEnv),
+			serviceCfg.AssertionFile,
+		),
+		AssertionCommand: firstNonEmpty(
+			opts.AssertionCommand,
+			envValue(serviceCfg.AssertionCommandEnv),
+			serviceCfg.AssertionCommand,
+		),
+		ClientAssertion: firstNonEmpty(
+			opts.ClientAssertion,
+			envValue(serviceCfg.ClientAssertionEnv),
+			serviceCfg.ClientAssertion,
+		),
+		ClientAssertionFile: firstNonEmpty(
+			opts.ClientAssertionFile,
+			envValue(serviceCfg.ClientAssertionFileEnv),
+			serviceCfg.ClientAssertionFile,
+		),
+		ClientAssertionCommand: firstNonEmpty(
+			opts.ClientAssertionCommand,
+			envValue(serviceCfg.ClientAssertionCommandEnv),
+			serviceCfg.ClientAssertionCommand,
+		),
+		SubjectToken: firstNonEmpty(
+			opts.SubjectToken,
+			envValue(serviceCfg.SubjectTokenEnv),
+			serviceCfg.SubjectToken,
+		),
+		SubjectTokenFile: firstNonEmpty(
+			opts.SubjectTokenFile,
+			envValue(serviceCfg.SubjectTokenFileEnv),
+			serviceCfg.SubjectTokenFile,
+		),
+		SubjectTokenCommand: firstNonEmpty(
+			opts.SubjectTokenCommand,
+			envValue(serviceCfg.SubjectTokenCommandEnv),
+			serviceCfg.SubjectTokenCommand,
+		),
+		SubjectTokenType:   firstNonEmpty(opts.SubjectTokenType, serviceCfg.SubjectTokenType),
+		RequestedTokenType: firstNonEmpty(opts.RequestedTokenType, serviceCfg.RequestedTokenType),
+		PrivateKeyFile: firstNonEmpty(
+			opts.PrivateKeyFile,
+			envValue(serviceCfg.PrivateKeyFileEnv),
+			serviceCfg.PrivateKeyFile,
+		),
+		KeyID: firstNonEmpty(
+			opts.KeyID,
+			envValue(serviceCfg.KeyIDEnv),
+			serviceCfg.KeyID,
+		),
+		JWTIssuer: firstNonEmpty(
+			opts.JWTIssuer,
+			envValue(serviceCfg.JWTIssuerEnv),
+			serviceCfg.JWTIssuer,
+		),
+		JWTSubject: firstNonEmpty(
+			opts.JWTSubject,
+			envValue(serviceCfg.JWTSubjectEnv),
+			serviceCfg.JWTSubject,
+		),
+		JWTAudience: firstNonEmpty(
+			opts.JWTAudience,
+			envValue(serviceCfg.JWTAudienceEnv),
+			serviceCfg.JWTAudience,
+		),
+		JWTExpiresIn: opts.JWTExpiresIn,
 	}
 	if request.ClientID == "" {
 		return tokenServiceRequest{}, fmt.Errorf("token service %q client_id is required", serviceName)
@@ -329,8 +505,25 @@ func normalizeOAuthFlow(flow string) string {
 		return "authorization-code"
 	case "device", "device-code", "device_code":
 		return "device"
+	case "client_credentials", "client-credentials", "client":
+		return "client-credentials"
+	case "jwt_client_credentials", "jwt-client-credentials", "client-credentials-jwt", "client_assertion", "client-assertion":
+		return "jwt-client-credentials"
+	case "jwt_bearer", "jwt-bearer", "assertion", "user-jwt", "user_jwt":
+		return "jwt-bearer"
+	case "token_exchange", "token-exchange", "workload", "workload-identity", "workload_identity", "federated-workload", "federated_workload":
+		return "token-exchange"
 	default:
 		return strings.ToLower(strings.TrimSpace(flow))
+	}
+}
+
+func isNonInteractiveOAuthFlow(flow string) bool {
+	switch flow {
+	case "client-credentials", "jwt-client-credentials", "jwt-bearer", "token-exchange":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -367,6 +560,64 @@ func runOAuthDeviceLogin(cmd *cobra.Command, request tokenServiceRequest, openBr
 		return authTokenCacheEntry{}, err
 	}
 	return cacheEntryFromToken(request, token), nil
+}
+
+func runOAuthNonInteractiveTokenFlow(request tokenServiceRequest) (authTokenCacheEntry, error) {
+	if strings.TrimSpace(request.Scope) == "" {
+		return authTokenCacheEntry{}, fmt.Errorf("token service %q scope is required", request.Service)
+	}
+	if err := resolveOAuthTokenEndpoint(&request); err != nil {
+		return authTokenCacheEntry{}, err
+	}
+
+	var token oauthTokenResponse
+	var err error
+	switch normalizeOAuthFlow(request.Flow) {
+	case "client-credentials":
+		token, err = exchangeClientCredentials(request, "")
+	case "jwt-client-credentials":
+		assertion, assertionErr := resolveClientAssertion(request)
+		if assertionErr != nil {
+			return authTokenCacheEntry{}, assertionErr
+		}
+		token, err = exchangeClientCredentials(request, assertion)
+	case "jwt-bearer":
+		assertion, assertionErr := resolveBearerAssertion(request)
+		if assertionErr != nil {
+			return authTokenCacheEntry{}, assertionErr
+		}
+		token, err = exchangeJWTBearerAssertion(request, assertion)
+	case "token-exchange":
+		subjectToken, tokenErr := resolveSubjectToken(request)
+		if tokenErr != nil {
+			return authTokenCacheEntry{}, tokenErr
+		}
+		token, err = exchangeSubjectToken(request, subjectToken)
+	default:
+		return authTokenCacheEntry{}, fmt.Errorf("unsupported non-interactive OAuth flow %q", request.Flow)
+	}
+	if err != nil {
+		return authTokenCacheEntry{}, err
+	}
+	return cacheEntryFromToken(request, token), nil
+}
+
+func resolveOAuthTokenEndpoint(request *tokenServiceRequest) error {
+	if request.TokenEndpoint != "" {
+		return nil
+	}
+	if strings.TrimSpace(request.Issuer) == "" {
+		return fmt.Errorf("token service %q issuer or token endpoint is required", request.Service)
+	}
+	discovery, err := fetchOAuthDiscovery(request.Issuer)
+	if err != nil {
+		return err
+	}
+	if discovery.TokenEndpoint == "" {
+		return fmt.Errorf("issuer discovery did not provide token endpoint")
+	}
+	request.TokenEndpoint = discovery.TokenEndpoint
+	return nil
 }
 
 func fetchOAuthDiscovery(issuer string) (oauthDiscoveryDocument, error) {
@@ -619,6 +870,282 @@ func refreshOAuthToken(request tokenServiceRequest, refreshToken string) (oauthT
 		form.Set("client_secret", request.ClientSecret)
 	}
 	return postOAuthTokenForm(request.TokenEndpoint, form)
+}
+
+func exchangeClientCredentials(request tokenServiceRequest, clientAssertion string) (oauthTokenResponse, error) {
+	form := url.Values{
+		"grant_type": {"client_credentials"},
+		"client_id":  {request.ClientID},
+		"scope":      {request.Scope},
+	}
+	if clientAssertion != "" {
+		form.Set("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
+		form.Set("client_assertion", clientAssertion)
+	} else if request.ClientSecret != "" {
+		form.Set("client_secret", request.ClientSecret)
+	}
+	return postOAuthTokenForm(request.TokenEndpoint, form)
+}
+
+func exchangeJWTBearerAssertion(request tokenServiceRequest, assertion string) (oauthTokenResponse, error) {
+	form := url.Values{
+		"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"},
+		"assertion":  {assertion},
+		"client_id":  {request.ClientID},
+		"scope":      {request.Scope},
+	}
+	if request.ClientSecret != "" {
+		form.Set("client_secret", request.ClientSecret)
+	}
+	return postOAuthTokenForm(request.TokenEndpoint, form)
+}
+
+func exchangeSubjectToken(request tokenServiceRequest, subjectToken string) (oauthTokenResponse, error) {
+	form := url.Values{
+		"grant_type": {"urn:ietf:params:oauth:grant-type:token-exchange"},
+		"client_id":  {request.ClientID},
+		"scope":      {request.Scope},
+		"subject_token_type": {firstNonEmpty(
+			request.SubjectTokenType,
+			"urn:ietf:params:oauth:token-type:jwt",
+		)},
+		"subject_token": {subjectToken},
+	}
+	if request.RequestedTokenType != "" {
+		form.Set("requested_token_type", request.RequestedTokenType)
+	}
+	if request.ClientSecret != "" {
+		form.Set("client_secret", request.ClientSecret)
+	}
+	return postOAuthTokenForm(request.TokenEndpoint, form)
+}
+
+func resolveBearerAssertion(request tokenServiceRequest) (string, error) {
+	assertion, err := resolveSecretMaterial(secretMaterialSource{
+		Inline:  request.Assertion,
+		File:    request.AssertionFile,
+		Command: request.AssertionCommand,
+		Label:   "JWT bearer assertion",
+	})
+	if err != nil {
+		return "", err
+	}
+	if assertion != "" {
+		return assertion, nil
+	}
+	return signBearerAssertion(request)
+}
+
+func resolveClientAssertion(request tokenServiceRequest) (string, error) {
+	assertion, err := resolveSecretMaterial(secretMaterialSource{
+		Inline:  request.ClientAssertion,
+		File:    request.ClientAssertionFile,
+		Command: request.ClientAssertionCommand,
+		Label:   "JWT client assertion",
+	})
+	if err != nil {
+		return "", err
+	}
+	if assertion != "" {
+		return assertion, nil
+	}
+	return signClientAssertion(request)
+}
+
+func resolveSubjectToken(request tokenServiceRequest) (string, error) {
+	token, err := resolveSecretMaterial(secretMaterialSource{
+		Inline:  request.SubjectToken,
+		File:    request.SubjectTokenFile,
+		Command: request.SubjectTokenCommand,
+		Label:   "subject token",
+	})
+	if err != nil {
+		return "", err
+	}
+	if token == "" {
+		return "", fmt.Errorf("subject token is required for token-exchange flow; set --subject-token-file or --subject-token-command")
+	}
+	return token, nil
+}
+
+type secretMaterialSource struct {
+	Inline  string
+	File    string
+	Command string
+	Label   string
+}
+
+func resolveSecretMaterial(source secretMaterialSource) (string, error) {
+	if strings.TrimSpace(source.Inline) != "" {
+		return strings.TrimSpace(source.Inline), nil
+	}
+	if strings.TrimSpace(source.File) != "" {
+		data, err := os.ReadFile(source.File)
+		if err != nil {
+			return "", fmt.Errorf("read %s file: %w", source.Label, err)
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
+	if strings.TrimSpace(source.Command) != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "/bin/sh", "-c", source.Command).Output()
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("%s command timed out", source.Label)
+		}
+		if err != nil {
+			return "", fmt.Errorf("%s command failed: %w", source.Label, err)
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	return "", nil
+}
+
+func signClientAssertion(request tokenServiceRequest) (string, error) {
+	if request.PrivateKeyFile == "" {
+		return "", fmt.Errorf("JWT client assertion is required for jwt-client-credentials flow; set --client-assertion-file, --client-assertion-command, or --private-key-file")
+	}
+	return signOAuthJWT(request, oauthJWTClaims{
+		Issuer:   request.ClientID,
+		Subject:  request.ClientID,
+		Audience: firstNonEmpty(request.JWTAudience, request.TokenEndpoint),
+	})
+}
+
+func signBearerAssertion(request tokenServiceRequest) (string, error) {
+	if request.PrivateKeyFile == "" {
+		return "", fmt.Errorf("JWT bearer assertion is required for jwt-bearer flow; set --assertion-file, --assertion-command, or --private-key-file")
+	}
+	issuer := firstNonEmpty(request.JWTIssuer, request.ClientID)
+	subject := request.JWTSubject
+	if subject == "" {
+		return "", fmt.Errorf("jwt-bearer local signing requires --jwt-subject")
+	}
+	return signOAuthJWT(request, oauthJWTClaims{
+		Issuer:   issuer,
+		Subject:  subject,
+		Audience: firstNonEmpty(request.JWTAudience, request.TokenEndpoint),
+	})
+}
+
+type oauthJWTClaims struct {
+	Issuer   string
+	Subject  string
+	Audience string
+}
+
+func signOAuthJWT(request tokenServiceRequest, input oauthJWTClaims) (string, error) {
+	if input.Issuer == "" || input.Subject == "" || input.Audience == "" {
+		return "", fmt.Errorf("JWT local signing requires issuer, subject, and audience")
+	}
+	expiresIn := request.JWTExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 5 * time.Minute
+	}
+	key, err := readPrivateKey(request.PrivateKeyFile)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	jti, err := randomURLSafeString(16)
+	if err != nil {
+		return "", err
+	}
+	header := map[string]string{
+		"typ": "JWT",
+		"alg": jwtSigningAlg(key),
+	}
+	if request.KeyID != "" {
+		header["kid"] = request.KeyID
+	}
+	claims := map[string]any{
+		"iss": input.Issuer,
+		"sub": input.Subject,
+		"aud": input.Audience,
+		"iat": now.Unix(),
+		"exp": now.Add(expiresIn).Unix(),
+		"jti": jti,
+	}
+	return signJWT(header, claims, key)
+}
+
+func readPrivateKey(path string) (any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read private key: %w", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("private key file does not contain PEM data")
+	}
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	return nil, fmt.Errorf("private key file must contain a PKCS#8, PKCS#1 RSA, or EC private key")
+}
+
+func jwtSigningAlg(key any) string {
+	switch key.(type) {
+	case *ecdsa.PrivateKey:
+		return "ES256"
+	default:
+		return "RS256"
+	}
+}
+
+func signJWT(header map[string]string, claims map[string]any, key any) (string, error) {
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		return "", err
+	}
+	claimsJSON, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	payload := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
+	sum := sha256.Sum256([]byte(payload))
+
+	var signature []byte
+	switch privateKey := key.(type) {
+	case *rsa.PrivateKey:
+		signature, err = rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, sum[:])
+	case *ecdsa.PrivateKey:
+		signature, err = signECDSAJWT(privateKey, sum[:])
+	default:
+		return "", fmt.Errorf("unsupported private key type %T", key)
+	}
+	if err != nil {
+		return "", err
+	}
+	return payload + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+func signECDSAJWT(key *ecdsa.PrivateKey, digest []byte) ([]byte, error) {
+	if key.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("only P-256 EC private keys are supported for JWT signing")
+	}
+	r, s, err := ecdsa.Sign(rand.Reader, key, digest)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 64)
+	writeBigEndianFixed(out[:32], r)
+	writeBigEndianFixed(out[32:], s)
+	return out, nil
+}
+
+func writeBigEndianFixed(dst []byte, v *big.Int) {
+	for i := range dst {
+		dst[i] = 0
+	}
+	bytes := v.Bytes()
+	copy(dst[len(dst)-len(bytes):], bytes)
 }
 
 func postOAuthTokenForm(endpoint string, form url.Values) (oauthTokenResponse, error) {
