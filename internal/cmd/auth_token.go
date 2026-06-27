@@ -102,6 +102,7 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 	var format string
 	var noLogin bool
 	var noBrowser bool
+	var noCache bool
 
 	cmd := &cobra.Command{
 		Use:   "token",
@@ -153,20 +154,23 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 			if err != nil {
 				return err
 			}
-			entry, err := readAuthTokenCache(cachePath)
-			if err == nil && authTokenUsable(entry) {
-				return printAuthToken(cmd, entry, format, ctx)
-			}
-			if err == nil && strings.TrimSpace(entry.RefreshToken) != "" {
-				refreshed, refreshErr := refreshOAuthToken(request, entry.RefreshToken)
-				if refreshErr == nil {
-					oldRefreshToken := entry.RefreshToken
-					entry = cacheEntryFromToken(request, refreshed)
-					entry.RefreshToken = firstNonEmpty(refreshed.RefreshToken, oldRefreshToken)
-					if err := writeAuthTokenCache(cachePath, entry); err != nil {
-						return err
-					}
+			var entry authTokenCacheEntry
+			if !noCache {
+				entry, err = readAuthTokenCache(cachePath)
+				if err == nil && authTokenUsable(entry) {
 					return printAuthToken(cmd, entry, format, ctx)
+				}
+				if err == nil && strings.TrimSpace(entry.RefreshToken) != "" {
+					refreshed, refreshErr := refreshOAuthToken(request, entry.RefreshToken)
+					if refreshErr == nil {
+						oldRefreshToken := entry.RefreshToken
+						entry = cacheEntryFromToken(request, refreshed)
+						entry.RefreshToken = firstNonEmpty(refreshed.RefreshToken, oldRefreshToken)
+						if err := writeAuthTokenCache(cachePath, entry); err != nil {
+							return err
+						}
+						return printAuthToken(cmd, entry, format, ctx)
+					}
 				}
 			}
 			if isNonInteractiveOAuthFlow(normalizeOAuthFlow(request.Flow)) {
@@ -174,8 +178,10 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 				if err != nil {
 					return err
 				}
-				if err := writeAuthTokenCache(cachePath, entry); err != nil {
-					return err
+				if !noCache {
+					if err := writeAuthTokenCache(cachePath, entry); err != nil {
+						return err
+					}
 				}
 				return printAuthToken(cmd, entry, format, ctx)
 			}
@@ -186,8 +192,10 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 			if err != nil {
 				return err
 			}
-			if err := writeAuthTokenCache(cachePath, entry); err != nil {
-				return err
+			if !noCache {
+				if err := writeAuthTokenCache(cachePath, entry); err != nil {
+					return err
+				}
 			}
 			return printAuthToken(cmd, entry, format, ctx)
 		},
@@ -223,6 +231,7 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 	cmd.Flags().StringVar(&format, "format", "raw", "Output format: raw|json")
 	cmd.Flags().BoolVar(&noLogin, "no-login", false, "Fail instead of starting an interactive login")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the verification URL in a browser")
+	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Bypass cached OAuth tokens and do not update the token cache")
 	return cmd
 }
 
@@ -581,6 +590,15 @@ func runOAuthNonInteractiveTokenFlow(request tokenServiceRequest) (authTokenCach
 			return authTokenCacheEntry{}, assertionErr
 		}
 		token, err = exchangeClientCredentials(request, assertion)
+		if shouldRetryIDCSClientAssertionAudience(request, err) {
+			retryRequest := request
+			retryRequest.JWTAudience = "https://identity.oraclecloud.com/"
+			assertion, assertionErr = resolveClientAssertion(retryRequest)
+			if assertionErr != nil {
+				return authTokenCacheEntry{}, assertionErr
+			}
+			token, err = exchangeClientCredentials(retryRequest, assertion)
+		}
 	case "jwt-bearer":
 		assertion, assertionErr := resolveBearerAssertion(request)
 		if assertionErr != nil {
@@ -600,6 +618,37 @@ func runOAuthNonInteractiveTokenFlow(request tokenServiceRequest) (authTokenCach
 		return authTokenCacheEntry{}, err
 	}
 	return cacheEntryFromToken(request, token), nil
+}
+
+func shouldRetryIDCSClientAssertionAudience(request tokenServiceRequest, err error) bool {
+	if err == nil {
+		return false
+	}
+	if strings.TrimSpace(request.JWTAudience) != "" {
+		return false
+	}
+	if strings.TrimSpace(request.PrivateKeyFile) == "" || hasClientAssertionMaterial(request) {
+		return false
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "invalid audience in client assertion") {
+		return false
+	}
+	return isOCIIdentityDomainURL(request.TokenEndpoint) || isOCIIdentityDomainURL(request.Issuer)
+}
+
+func hasClientAssertionMaterial(request tokenServiceRequest) bool {
+	return strings.TrimSpace(request.ClientAssertion) != "" ||
+		strings.TrimSpace(request.ClientAssertionFile) != "" ||
+		strings.TrimSpace(request.ClientAssertionCommand) != ""
+}
+
+func isOCIIdentityDomainURL(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return strings.HasSuffix(host, ".identity.oraclecloud.com")
 }
 
 func resolveOAuthTokenEndpoint(request *tokenServiceRequest) error {

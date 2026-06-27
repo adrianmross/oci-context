@@ -422,6 +422,129 @@ func TestAuthTokenJWTClientCredentialsCanSignClientAssertion(t *testing.T) {
 	}
 }
 
+func TestAuthTokenJWTClientCredentialsRetriesIDCSAudience(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	keyPath := t.TempDir() + "/client.key"
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+
+	var attempts int
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		attempts++
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		_, claims := decodeUnsignedJWT(t, r.Form.Get("client_assertion"))
+		switch attempts {
+		case 1:
+			if claims["aud"] != server.URL+"/token" {
+				t.Fatalf("unexpected first audience: %v", claims)
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":"invalid_client","error_description":"Invalid audience in client assertion."}`)
+		case 2:
+			if claims["aud"] != "https://identity.oraclecloud.com/" {
+				t.Fatalf("unexpected retry audience: %v", claims)
+			}
+			fmt.Fprint(w, `{"access_token":"idcs-audience-token","token_type":"Bearer","expires_in":3600}`)
+		default:
+			t.Fatalf("unexpected token request %d", attempts)
+		}
+	}))
+	defer server.Close()
+
+	cfgPath := writeAuthTokenTestConfig(t)
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"auth", "token",
+		"--config", cfgPath,
+		"--service", "obp",
+		"--flow", "jwt-client-credentials",
+		"--issuer", "https://idcs-example.identity.oraclecloud.com",
+		"--token-endpoint", server.URL + "/token",
+		"--client-id", "obp-sa",
+		"--scope", "https://obp.example.com/restproxy",
+		"--private-key-file", keyPath,
+		"--key-id", "kid-1",
+		"--no-login",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth token: %v", err)
+	}
+	if out.String() != "idcs-audience-token\n" {
+		t.Fatalf("expected retry token, got %q", out.String())
+	}
+	if attempts != 2 {
+		t.Fatalf("expected two token attempts, got %d", attempts)
+	}
+}
+
+func TestAuthTokenNoCacheBypassesAndDoesNotUpdateCache(t *testing.T) {
+	var tokenRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		tokenRequests++
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		fmt.Fprintf(w, `{"access_token":"token-%d","token_type":"Bearer","expires_in":3600}`, tokenRequests)
+	}))
+	defer server.Close()
+
+	cfgPath := writeAuthTokenTestConfig(t)
+	run := func(extra ...string) string {
+		t.Helper()
+		cmd := newRootCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		args := []string{
+			"auth", "token",
+			"--config", cfgPath,
+			"--service", "obp",
+			"--flow", "client-credentials",
+			"--token-endpoint", server.URL + "/token",
+			"--client-id", "obp-sa",
+			"--client-secret", "secret",
+			"--scope", "https://obp.example.com/restproxy",
+			"--no-login",
+		}
+		args = append(args, extra...)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("auth token: %v", err)
+		}
+		return out.String()
+	}
+
+	if got := run(); got != "token-1\n" {
+		t.Fatalf("expected first token, got %q", got)
+	}
+	if got := run("--no-cache"); got != "token-2\n" {
+		t.Fatalf("expected no-cache token, got %q", got)
+	}
+	if got := run(); got != "token-1\n" {
+		t.Fatalf("expected original cached token after no-cache run, got %q", got)
+	}
+	if tokenRequests != 2 {
+		t.Fatalf("expected two token requests, got %d", tokenRequests)
+	}
+}
+
 func TestAuthTokenJWTBearerUsesUserAssertion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/token" {
