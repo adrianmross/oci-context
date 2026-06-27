@@ -32,6 +32,26 @@ func TestAuthCapabilityForMethod(t *testing.T) {
 	}
 }
 
+func TestResolveLoopbackRedirectRejectsCloudGatePlaceholder(t *testing.T) {
+	_, _, _, err := resolveLoopbackRedirect("https://%hostid%/cloudgate/v1/oauth2/callback")
+	if err == nil {
+		t.Fatal("expected CloudGate callback error")
+	}
+	if !strings.Contains(err.Error(), "CloudGate") {
+		t.Fatalf("expected CloudGate-specific error, got %v", err)
+	}
+}
+
+func TestResolveLoopbackRedirectRejectsHTTPSCallback(t *testing.T) {
+	_, _, _, err := resolveLoopbackRedirect("https://example.com/oauth/callback")
+	if err == nil {
+		t.Fatal("expected non-loopback callback error")
+	}
+	if !strings.Contains(err.Error(), "http loopback URL") {
+		t.Fatalf("expected loopback-specific error, got %v", err)
+	}
+}
+
 func TestAuthTokenOAuthDeviceServiceCachesAndEmitsJSON(t *testing.T) {
 	var tokenRequests int
 	var server *httptest.Server
