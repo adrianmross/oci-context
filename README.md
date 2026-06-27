@@ -159,6 +159,70 @@ loopback redirect such as `http://127.0.0.1:8180/callback`, or use a trusted
 non-interactive flow such as client credentials or JWT assertion when that is
 the intended identity.
 
+Non-interactive OAuth flows are first-class and can run under `--no-login`.
+Use `jwt-client-credentials` for service accounts whose IDCS app trusts a
+client assertion:
+
+```bash
+oci-context auth token \
+  --service obp \
+  --flow jwt-client-credentials \
+  --token-endpoint "$OCHAIN_OBP_AUTH_TOKEN_ENDPOINT" \
+  --client-id "$OCHAIN_OBP_AUTH_CLIENT_ID" \
+  --scope "$OCHAIN_OBP_AUTH_SCOPE" \
+  --client-assertion-command ./mint-client-assertion.sh \
+  --no-login \
+  --format raw
+```
+
+When the client assertion should be signed locally, provide a PEM private key
+and optional key id instead of a command:
+
+```bash
+oci-context auth token \
+  --service obp \
+  --flow jwt-client-credentials \
+  --token-endpoint "$OCHAIN_OBP_AUTH_TOKEN_ENDPOINT" \
+  --client-id "$OCHAIN_OBP_AUTH_CLIENT_ID" \
+  --scope "$OCHAIN_OBP_AUTH_SCOPE" \
+  --private-key-file ./idcs-client.key \
+  --key-id "$OCHAIN_OBP_AUTH_KEY_ID" \
+  --no-login \
+  --format raw
+```
+
+Use `jwt-bearer` when a trusted issuer can assert a user or subject that the
+identity domain maps to a service-authorized identity:
+
+```bash
+oci-context auth token \
+  --service obp \
+  --flow jwt-bearer \
+  --token-endpoint "$OCHAIN_OBP_AUTH_TOKEN_ENDPOINT" \
+  --client-id "$OCHAIN_OBP_AUTH_CLIENT_ID" \
+  --scope "$OCHAIN_OBP_AUTH_SCOPE" \
+  --assertion-command ./mint-user-assertion.sh \
+  --no-login \
+  --format raw
+```
+
+Use `token-exchange` for federated workload identity, such as a GitHub Actions
+OIDC token, Kubernetes projected service account token, or another external
+workload JWT:
+
+```bash
+oci-context auth token \
+  --service obp \
+  --flow token-exchange \
+  --token-endpoint "$OCHAIN_OBP_AUTH_TOKEN_ENDPOINT" \
+  --client-id "$OCHAIN_OBP_AUTH_CLIENT_ID" \
+  --scope "$OCHAIN_OBP_AUTH_SCOPE" \
+  --subject-token-command ./mint-workload-token.sh \
+  --requested-token-type urn:ietf:params:oauth:token-type:access_token \
+  --no-login \
+  --format raw
+```
+
 Inspect local metadata without calling OCI:
 
 ```bash
