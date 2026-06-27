@@ -14,9 +14,10 @@ import (
 
 // Config represents the persisted state for oci-context.
 type Config struct {
-	Options        Options   `yaml:"options" json:"options"`
-	Contexts       []Context `yaml:"contexts" json:"contexts"`
-	CurrentContext string    `yaml:"current_context" json:"current_context"`
+	Options        Options        `yaml:"options" json:"options"`
+	Contexts       []Context      `yaml:"contexts" json:"contexts"`
+	TokenServices  []TokenService `yaml:"token_services,omitempty" json:"token_services,omitempty"`
+	CurrentContext string         `yaml:"current_context" json:"current_context"`
 }
 
 // Options holds global settings.
@@ -38,6 +39,42 @@ type Context struct {
 	User            string `yaml:"user" json:"user"`
 	Notes           string `yaml:"notes" json:"notes"`
 }
+
+// TokenService describes a named token provider for command handoffs.
+type TokenService struct {
+	Name                      string   `yaml:"name" json:"name"`
+	Type                      string   `yaml:"type,omitempty" json:"type,omitempty"`
+	Issuer                    string   `yaml:"issuer,omitempty" json:"issuer,omitempty"`
+	IssuerEnv                 string   `yaml:"issuer_env,omitempty" json:"issuer_env,omitempty"`
+	IssuerEnvs                []string `yaml:"issuer_envs,omitempty" json:"issuer_envs,omitempty"`
+	ClientID                  string   `yaml:"client_id,omitempty" json:"client_id,omitempty"`
+	ClientIDEnv               string   `yaml:"client_id_env,omitempty" json:"client_id_env,omitempty"`
+	ClientIDEnvs              []string `yaml:"client_id_envs,omitempty" json:"client_id_envs,omitempty"`
+	ClientSecret              string   `yaml:"client_secret,omitempty" json:"client_secret,omitempty"`
+	ClientSecretEnv           string   `yaml:"client_secret_env,omitempty" json:"client_secret_env,omitempty"`
+	ClientSecretEnvs          []string `yaml:"client_secret_envs,omitempty" json:"client_secret_envs,omitempty"`
+	Scope                     string   `yaml:"scope,omitempty" json:"scope,omitempty"`
+	ScopeEnv                  string   `yaml:"scope_env,omitempty" json:"scope_env,omitempty"`
+	ScopeEnvs                 []string `yaml:"scope_envs,omitempty" json:"scope_envs,omitempty"`
+	AuthorizationEndpoint     string   `yaml:"authorization_endpoint,omitempty" json:"authorization_endpoint,omitempty"`
+	AuthorizationEndpointEnv  string   `yaml:"authorization_endpoint_env,omitempty" json:"authorization_endpoint_env,omitempty"`
+	AuthorizationEndpointEnvs []string `yaml:"authorization_endpoint_envs,omitempty" json:"authorization_endpoint_envs,omitempty"`
+	TokenEndpoint             string   `yaml:"token_endpoint,omitempty" json:"token_endpoint,omitempty"`
+	TokenEndpointEnv          string   `yaml:"token_endpoint_env,omitempty" json:"token_endpoint_env,omitempty"`
+	TokenEndpointEnvs         []string `yaml:"token_endpoint_envs,omitempty" json:"token_endpoint_envs,omitempty"`
+	DeviceEndpoint            string   `yaml:"device_endpoint,omitempty" json:"device_endpoint,omitempty"`
+	DeviceEnv                 string   `yaml:"device_endpoint_env,omitempty" json:"device_endpoint_env,omitempty"`
+	DeviceEnvs                []string `yaml:"device_endpoint_envs,omitempty" json:"device_endpoint_envs,omitempty"`
+	RedirectURL               string   `yaml:"redirect_url,omitempty" json:"redirect_url,omitempty"`
+	RedirectURLEnv            string   `yaml:"redirect_url_env,omitempty" json:"redirect_url_env,omitempty"`
+	RedirectURLEnvs           []string `yaml:"redirect_url_envs,omitempty" json:"redirect_url_envs,omitempty"`
+	Flow                      string   `yaml:"flow,omitempty" json:"flow,omitempty"`
+}
+
+const (
+	TokenServiceTypeOAuth       = "oauth"
+	TokenServiceTypeOAuthDevice = "oauth_device"
+)
 
 var (
 	ErrContextNotFound = errors.New("context not found")
@@ -92,7 +129,43 @@ func DefaultConfig(home string) Config {
 			DaemonContexts: []string{},
 		},
 		Contexts:       []Context{},
+		TokenServices:  DefaultTokenServices(),
 		CurrentContext: "",
+	}
+}
+
+func DefaultTokenServices() []TokenService {
+	return []TokenService{DefaultOBPTokenService()}
+}
+
+func DefaultOBPTokenService() TokenService {
+	return TokenService{
+		Name:        "obp",
+		Type:        TokenServiceTypeOAuth,
+		ClientID:    "obp",
+		ClientIDEnv: "OCHAIN_OBP_AUTH_CLIENT_ID",
+		ClientSecretEnvs: []string{
+			"OCHAIN_OBP_AUTH_CLIENT_SECRET",
+			"OBP_OAUTH2_CLIENT_SECRET",
+			"OBP_OAUTH2_IDCS_CLIENT_SECRET",
+		},
+		IssuerEnvs: []string{
+			"OCHAIN_OBP_AUTH_ISSUER",
+			"OBP_OAUTH2_ISSUER",
+			"OBP_OAUTH2_IDCS_ISSUER",
+		},
+		ScopeEnvs: []string{
+			"OCHAIN_OBP_AUTH_SCOPE",
+			"OCHAIN_OBP_PLATFORM",
+			"OBP_PLATFORM",
+		},
+		TokenEndpointEnvs: []string{
+			"OCHAIN_OBP_AUTH_TOKEN_ENDPOINT",
+			"OBP_OAUTH2_TOKEN_ENDPOINT",
+		},
+		AuthorizationEndpointEnv: "OCHAIN_OBP_AUTH_AUTHORIZATION_ENDPOINT",
+		DeviceEnv:                "OCHAIN_OBP_AUTH_DEVICE_ENDPOINT",
+		RedirectURLEnv:           "OCHAIN_OBP_AUTH_REDIRECT_URL",
 	}
 }
 

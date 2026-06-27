@@ -80,6 +80,85 @@ Make sure auth is ready before automation:
 oci-context auth ensure --output json
 ```
 
+Emit an OBP/OABCS token for another command without persisting it in that
+tool's config:
+
+```bash
+oci-context auth token --service obp --format raw
+```
+
+Tools such as `ochain` can use that as a credential-command bridge:
+
+```json
+{
+  "auth": {
+    "tokenCommand": "oci-context auth token --service obp --format raw"
+  }
+}
+```
+
+Token services are generic OAuth definitions. The shipped `obp` service reads
+the OChain-provided target metadata and uses `flow: auto`: Authorization Code is
+preferred when the issuer advertises an authorization endpoint, and Device Code
+is used only when that is the available interactive flow. Define additional
+services in config when another tool should use a different issuer, client,
+scope, redirect URL, or flow:
+
+```yaml
+token_services:
+  - name: obp
+    type: oauth
+    flow: authorization-code
+    issuer_envs:
+      - OCHAIN_OBP_AUTH_ISSUER
+      - OBP_OAUTH2_ISSUER
+    client_id: obp
+    client_secret_env: OCHAIN_OBP_AUTH_CLIENT_SECRET
+    scope_envs:
+      - OCHAIN_OBP_AUTH_SCOPE
+      - OCHAIN_OBP_PLATFORM
+    authorization_endpoint_env: OCHAIN_OBP_AUTH_AUTHORIZATION_ENDPOINT
+    token_endpoint_env: OCHAIN_OBP_AUTH_TOKEN_ENDPOINT
+    redirect_url_env: OCHAIN_OBP_AUTH_REDIRECT_URL
+```
+
+For the common Red Wiz OABCS target, select the OCI context for `oabcs1` in the
+default domain and configure the chaincode deploy environment for
+`pmdemo/adrian/did` on channel `testnet`. The token command reads
+`OCHAIN_OBP_AUTH_ISSUER`, `OCHAIN_OBP_AUTH_CLIENT_ID`, and
+`OCHAIN_OBP_AUTH_SCOPE` from the caller environment, so OChain can resolve the
+target and oci-context can own the browser login.
+
+For Oracle Identity Cloud Service domains that do not expose a Device Code
+endpoint, configure a CLI-capable IDCS application with Authorization Code and
+a loopback redirect URL, then force that flow locally:
+
+```bash
+export OCHAIN_OBP_AUTH_REDIRECT_URL=http://127.0.0.1:8180/callback
+oci-context auth token \
+  --service obp \
+  --flow authorization-code \
+  --redirect-url "$OCHAIN_OBP_AUTH_REDIRECT_URL" \
+  --format raw
+```
+
+Register the same redirect URL on the IDCS confidential application. If the
+client requires a secret, provide it through `OCHAIN_OBP_AUTH_CLIENT_SECRET` or
+service config rather than storing it in the downstream tool. stdout contains
+the bearer token and must be treated as secret material; browser instructions
+are written to stderr.
+
+The default OBPCS cloud-service application is normally a CloudGate web
+application. Its redirect is service-owned, for example
+`https://<hostid>/cloudgate/v1/oauth2/callback`. That callback is correct for
+browser access to the OBPCS service, but it is not a CLI callback:
+CloudGate receives and consumes the authorization code, so `oci-context` cannot
+exchange it for a bearer token. For command handoff, use a separate IDCS OAuth
+client that is allowed to request the OBP REST proxy scope and has a registered
+loopback redirect such as `http://127.0.0.1:8180/callback`, or use a trusted
+non-interactive flow such as client credentials or JWT assertion when that is
+the intended identity.
+
 Inspect local metadata without calling OCI:
 
 ```bash

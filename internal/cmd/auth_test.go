@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adrianmross/oci-context/pkg/config"
 	"github.com/spf13/cobra"
@@ -25,6 +29,363 @@ func TestAuthCapabilityForMethod(t *testing.T) {
 	rp := authCapabilityForMethod(config.AuthMethodResourcePrincipal)
 	if rp.CanLogin || rp.CanRefresh || rp.CanSetup || !rp.CanValidate {
 		t.Fatalf("unexpected resource_principal capabilities: %+v", rp)
+	}
+}
+
+func TestAuthTokenOAuthDeviceServiceCachesAndEmitsJSON(t *testing.T) {
+	var tokenRequests int
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			fmt.Fprintf(w, `{"device_authorization_endpoint":"%s/device","token_endpoint":"%s/token"}`, server.URL, server.URL)
+		case "/device":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if r.Form.Get("client_id") != "obp-native" || r.Form.Get("scope") != "https://obp.example.com/restproxy" {
+				t.Fatalf("unexpected device form: %v", r.Form)
+			}
+			fmt.Fprint(w, `{"device_code":"device-1","user_code":"ABCD-EFGH","verification_uri":"https://login.example.com/device","expires_in":60,"interval":1}`)
+		case "/token":
+			tokenRequests++
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if r.Form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:device_code" || r.Form.Get("device_code") != "device-1" {
+				t.Fatalf("unexpected token form: %v", r.Form)
+			}
+			fmt.Fprint(w, `{"access_token":"obp-token","token_type":"Bearer","expires_in":3600}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Config{
+		Options: config.Options{
+			OCIConfigPath: "/tmp/oci",
+			SocketPath:    t.TempDir() + "/daemon.sock",
+		},
+		TokenServices: []config.TokenService{{
+			Name:     "chaincode-obp",
+			Type:     config.TokenServiceTypeOAuthDevice,
+			Issuer:   server.URL,
+			ClientID: "obp-native",
+			Scope:    "https://obp.example.com/restproxy",
+		}},
+		Contexts: []config.Context{{
+			Name:        "dev",
+			Profile:     "DEFAULT",
+			AuthMethod:  config.AuthMethodSecurityToken,
+			TenancyOCID: "ocid1.tenancy.oc1..aaaa",
+			Region:      "us-phoenix-1",
+		}},
+		CurrentContext: "dev",
+	}
+	tmp := t.TempDir()
+	cfgPath := tmp + "/config.yml"
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{
+		"auth", "token",
+		"--config", cfgPath,
+		"--service", "chaincode-obp",
+		"--no-browser",
+		"--format", "json",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth token: %v\nstdout=%s\nstderr=%s", err, out.String(), errOut.String())
+	}
+
+	var got struct {
+		AccessToken string `json:"access_token"`
+		Service     string `json:"service"`
+		Context     string `json:"context"`
+		Profile     string `json:"profile"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal token json: %v\n%s", err, out.String())
+	}
+	if got.AccessToken != "obp-token" || got.Service != "chaincode-obp" || got.Context != "dev" || got.Profile != "DEFAULT" {
+		t.Fatalf("unexpected token payload: %+v", got)
+	}
+	if !strings.Contains(errOut.String(), "ABCD-EFGH") {
+		t.Fatalf("expected device code on stderr, got %q", errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	cmd = newRootCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{
+		"auth", "token",
+		"--config", cfgPath,
+		"--service", "chaincode-obp",
+		"--no-login",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cached auth token: %v", err)
+	}
+	if out.String() != "obp-token\n" {
+		t.Fatalf("expected raw cached token, got %q", out.String())
+	}
+	if tokenRequests != 1 {
+		t.Fatalf("expected cached raw output to avoid another token request, got %d", tokenRequests)
+	}
+}
+
+func TestAuthTokenOAuthAuthorizationCodeServiceCachesAndRefreshes(t *testing.T) {
+	var authorizationRedirect string
+	var tokenRequests int
+	var refreshRequests int
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			fmt.Fprintf(w, `{"authorization_endpoint":"%s/authorize","token_endpoint":"%s/token"}`, server.URL, server.URL)
+		case "/authorize":
+			query := r.URL.Query()
+			if query.Get("response_type") != "code" ||
+				query.Get("client_id") != "obp-native" ||
+				query.Get("scope") != "https://obp.example.com/restproxy" ||
+				query.Get("code_challenge_method") != "S256" ||
+				query.Get("code_challenge") == "" {
+				t.Fatalf("unexpected authorization query: %v", query)
+			}
+			authorizationRedirect = query.Get("redirect_uri")
+			redirect, err := url.Parse(authorizationRedirect)
+			if err != nil {
+				t.Fatalf("parse redirect: %v", err)
+			}
+			values := redirect.Query()
+			values.Set("code", "auth-code-1")
+			values.Set("state", query.Get("state"))
+			redirect.RawQuery = values.Encode()
+			http.Redirect(w, r, redirect.String(), http.StatusFound)
+		case "/token":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			switch r.Form.Get("grant_type") {
+			case "authorization_code":
+				tokenRequests++
+				if r.Form.Get("code") != "auth-code-1" ||
+					r.Form.Get("client_id") != "obp-native" ||
+					r.Form.Get("redirect_uri") != authorizationRedirect ||
+					r.Form.Get("code_verifier") == "" {
+					t.Fatalf("unexpected authorization-code token form: %v", r.Form)
+				}
+				fmt.Fprint(w, `{"access_token":"obp-user-token","refresh_token":"refresh-1","token_type":"Bearer","expires_in":1}`)
+			case "refresh_token":
+				refreshRequests++
+				if r.Form.Get("refresh_token") != "refresh-1" || r.Form.Get("client_id") != "obp-native" {
+					t.Fatalf("unexpected refresh token form: %v", r.Form)
+				}
+				fmt.Fprint(w, `{"access_token":"obp-refreshed-token","token_type":"Bearer","expires_in":3600}`)
+			default:
+				t.Fatalf("unexpected token grant: %v", r.Form)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Config{
+		Options: config.Options{
+			OCIConfigPath: "/tmp/oci",
+			SocketPath:    t.TempDir() + "/daemon.sock",
+		},
+		TokenServices: []config.TokenService{{
+			Name:     "chaincode-obp",
+			Type:     config.TokenServiceTypeOAuthDevice,
+			Issuer:   server.URL,
+			ClientID: "obp-native",
+			Scope:    "https://obp.example.com/restproxy",
+			Flow:     "authorization-code",
+		}},
+		Contexts: []config.Context{{
+			Name:        "dev",
+			Profile:     "DEFAULT",
+			AuthMethod:  config.AuthMethodSecurityToken,
+			TenancyOCID: "ocid1.tenancy.oc1..aaaa",
+			Region:      "us-phoenix-1",
+		}},
+		CurrentContext: "dev",
+	}
+	tmp := t.TempDir()
+	cfgPath := tmp + "/config.yml"
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{
+		"auth", "token",
+		"--config", cfgPath,
+		"--service", "chaincode-obp",
+		"--no-browser",
+		"--format", "json",
+	})
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- cmd.Execute()
+	}()
+
+	authURL := waitForAuthURL(t, &errOut)
+	resp, err := http.Get(authURL)
+	if err != nil {
+		t.Fatalf("follow authorization redirect: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("auth token: %v\nstdout=%s\nstderr=%s", err, out.String(), errOut.String())
+	}
+	var got struct {
+		AccessToken string `json:"access_token"`
+		Service     string `json:"service"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal token json: %v\n%s", err, out.String())
+	}
+	if got.AccessToken != "obp-user-token" || got.Service != "chaincode-obp" {
+		t.Fatalf("unexpected token payload: %+v", got)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+	out.Reset()
+	errOut.Reset()
+	cmd = newRootCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{
+		"auth", "token",
+		"--config", cfgPath,
+		"--service", "chaincode-obp",
+		"--no-login",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cached refresh auth token: %v\nstderr=%s", err, errOut.String())
+	}
+	if out.String() != "obp-refreshed-token\n" {
+		t.Fatalf("expected refreshed raw token, got %q", out.String())
+	}
+	if tokenRequests != 1 || refreshRequests != 1 {
+		t.Fatalf("expected one code token request and one refresh, got code=%d refresh=%d", tokenRequests, refreshRequests)
+	}
+}
+
+func waitForAuthURL(t *testing.T, errOut *bytes.Buffer) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, line := range strings.Split(errOut.String(), "\n") {
+			if strings.HasPrefix(line, "Open ") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "Open "))
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for auth URL in stderr: %q", errOut.String())
+	return ""
+}
+
+func TestAuthTokenDefaultOBPServiceUsesGenericEnvBindings(t *testing.T) {
+	t.Setenv("OCHAIN_OBP_AUTH_ISSUER", "https://issuer.example.com")
+	t.Setenv("OCHAIN_OBP_AUTH_CLIENT_ID", "obp-native")
+	t.Setenv("OCHAIN_OBP_AUTH_SCOPE", "https://obp.example.com/restproxy")
+	t.Setenv("OCHAIN_OBP_AUTH_TOKEN_ENDPOINT", "https://issuer.example.com/token")
+	t.Setenv("OCHAIN_OBP_AUTH_DEVICE_ENDPOINT", "https://issuer.example.com/device")
+
+	request, err := resolveTokenServiceRequest(config.Config{}, tokenServiceOptions{Service: "obp"})
+	if err != nil {
+		t.Fatalf("resolve token service: %v", err)
+	}
+	if request.Service != "obp" || request.Type != config.TokenServiceTypeOAuth {
+		t.Fatalf("unexpected service metadata: %+v", request)
+	}
+	if request.Issuer != "https://issuer.example.com" ||
+		request.ClientID != "obp-native" ||
+		request.Scope != "https://obp.example.com/restproxy" ||
+		request.TokenEndpoint != "https://issuer.example.com/token" ||
+		request.DeviceEndpoint != "https://issuer.example.com/device" {
+		t.Fatalf("unexpected request: %+v", request)
+	}
+}
+
+func TestAuthTokenConfiguredServiceUsesGenericEnvLists(t *testing.T) {
+	t.Setenv("CHAINCODE_ISSUER", "https://issuer.example.com")
+	t.Setenv("CHAINCODE_SCOPE", "https://obp.example.com/restproxy")
+
+	cfg := config.Config{
+		TokenServices: []config.TokenService{{
+			Name:       "chaincode",
+			Type:       config.TokenServiceTypeOAuthDevice,
+			IssuerEnvs: []string{"CHAINCODE_ISSUER"},
+			ClientID:   "chaincode-client",
+			ScopeEnvs:  []string{"CHAINCODE_SCOPE"},
+		}},
+	}
+
+	request, err := resolveTokenServiceRequest(cfg, tokenServiceOptions{Service: "chaincode"})
+	if err != nil {
+		t.Fatalf("resolve token service: %v", err)
+	}
+	if request.Issuer != "https://issuer.example.com" ||
+		request.ClientID != "chaincode-client" ||
+		request.Scope != "https://obp.example.com/restproxy" {
+		t.Fatalf("unexpected request: %+v", request)
+	}
+}
+
+func TestAuthTokenNoInteractiveRequiresCachedToken(t *testing.T) {
+	cfg := config.Config{
+		Options: config.Options{
+			OCIConfigPath: "/tmp/oci",
+			SocketPath:    t.TempDir() + "/daemon.sock",
+		},
+		Contexts: []config.Context{{
+			Name:        "dev",
+			Profile:     "DEFAULT",
+			AuthMethod:  config.AuthMethodSecurityToken,
+			TenancyOCID: "ocid1.tenancy.oc1..aaaa",
+			Region:      "us-phoenix-1",
+		}},
+		CurrentContext: "dev",
+	}
+	tmp := t.TempDir()
+	cfgPath := tmp + "/config.yml"
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"--no-interactive",
+		"auth", "token",
+		"--config", cfgPath,
+		"--issuer", "https://issuer.example.com",
+		"--scope", "https://obp.example.com/restproxy",
+	})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "no cached obp token") {
+		t.Fatalf("expected cached-token error, got %v", err)
 	}
 }
 
