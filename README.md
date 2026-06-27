@@ -191,6 +191,13 @@ oci-context auth token \
   --format raw
 ```
 
+For OCI Identity Domains, locally signed client assertions normally use
+`https://identity.oraclecloud.com/` as the assertion audience. `oci-context`
+uses the token endpoint by default for generic OAuth servers, but if an OCI
+Identity Domains token endpoint rejects that default with an invalid assertion
+audience error, it retries once with the OCI audience. You can make that
+explicit with `--jwt-audience https://identity.oraclecloud.com/`.
+
 Use `jwt-bearer` when a trusted issuer can assert a user or subject that the
 identity domain maps to a service-authorized identity:
 
@@ -222,6 +229,11 @@ oci-context auth token \
   --no-login \
   --format raw
 ```
+
+OAuth tokens are cached by service and are reused under `--no-login` when still
+valid. Use `--no-cache` to force a fresh token request and avoid updating the
+cached token, for example when validating a new IDCS app, role grant, or signing
+key without disturbing a known-good cached token.
 
 Inspect local metadata without calling OCI:
 
