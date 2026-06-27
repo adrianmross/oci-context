@@ -479,12 +479,15 @@ func resolveLoopbackRedirect(rawRedirectURL string) (redirectURL string, listenA
 	if rawRedirectURL == "" {
 		return "", "127.0.0.1:0", "/callback", nil
 	}
+	if isCloudGateCallback(rawRedirectURL) {
+		return "", "", "", cloudGateCallbackError()
+	}
 	parsed, err := url.Parse(rawRedirectURL)
 	if err != nil {
 		return "", "", "", err
 	}
 	if parsed.Scheme != "http" {
-		return "", "", "", fmt.Errorf("authorization-code redirect URL must be an http loopback URL that oci-context can receive; service callbacks such as https://<host>/cloudgate/v1/oauth2/callback are handled by CloudGate and cannot complete CLI token handoff")
+		return "", "", "", cloudGateCallbackError()
 	}
 	host := parsed.Hostname()
 	if host != "127.0.0.1" && host != "localhost" {
@@ -517,6 +520,15 @@ func buildAuthorizationURL(request tokenServiceRequest, redirectURL string, stat
 	query.Set("code_challenge_method", "S256")
 	parsed.RawQuery = query.Encode()
 	return parsed.String(), nil
+}
+
+func isCloudGateCallback(rawRedirectURL string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(rawRedirectURL))
+	return strings.Contains(normalized, "/cloudgate/v1/oauth2/callback")
+}
+
+func cloudGateCallbackError() error {
+	return fmt.Errorf("authorization-code redirect URL must be an http loopback URL that oci-context can receive; service callbacks such as https://<host>/cloudgate/v1/oauth2/callback are handled by CloudGate and cannot complete CLI token handoff")
 }
 
 func exchangeAuthorizationCode(request tokenServiceRequest, code string, redirectURL string, verifier string) (oauthTokenResponse, error) {
