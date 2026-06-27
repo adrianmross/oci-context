@@ -122,6 +122,17 @@ token_services:
     redirect_url_env: OCHAIN_OBP_AUTH_REDIRECT_URL
 ```
 
+`oci-idm` materializes `oci-context-token-services.yml` and
+`oci-context.handoff.json` files for planned Identity Domains apps. Import
+either handoff shape directly:
+
+```bash
+oci-context auth service import \
+  --file ./idm-artifacts/oci-context-token-services.yml
+
+oci-context auth service list
+```
+
 For the common Red Wiz OABCS target, select the OCI context for `oabcs1` in the
 default domain and configure the chaincode deploy environment for
 `pmdemo/adrian/did` on channel `testnet`. The token command reads
