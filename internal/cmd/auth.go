@@ -3,6 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -88,6 +90,20 @@ type authShowResult struct {
 	DaemonAvailable bool                  `json:"daemon_available" yaml:"daemon_available"`
 	DaemonError     string                `json:"daemon_error,omitempty" yaml:"daemon_error,omitempty"`
 	Daemon          *daemonpkg.AuthStatus `json:"daemon,omitempty" yaml:"daemon,omitempty"`
+}
+
+type authLoginInput struct {
+	ContextName           string `json:"contextName,omitempty" yaml:"contextName,omitempty"`
+	Context               string `json:"context,omitempty" yaml:"context,omitempty"`
+	ServiceName           string `json:"serviceName,omitempty" yaml:"serviceName,omitempty"`
+	Service               string `json:"service,omitempty" yaml:"service,omitempty"`
+	Issuer                string `json:"issuer,omitempty" yaml:"issuer,omitempty"`
+	Scope                 string `json:"scope,omitempty" yaml:"scope,omitempty"`
+	AuthorizationEndpoint string `json:"authorizationEndpoint,omitempty" yaml:"authorizationEndpoint,omitempty"`
+	TokenEndpoint         string `json:"tokenEndpoint,omitempty" yaml:"tokenEndpoint,omitempty"`
+	RedirectURL           string `json:"redirectURL,omitempty" yaml:"redirectURL,omitempty"`
+	ClientID              string `json:"clientId,omitempty" yaml:"clientId,omitempty"`
+	Flow                  string `json:"flow,omitempty" yaml:"flow,omitempty"`
 }
 
 func authCapabilityForMethod(method string) authCapability {
@@ -290,6 +306,150 @@ func authLoginCommand(ctx config.Context) string {
 		parts = append(parts, "--context", ctx.Name)
 	}
 	return strings.Join(parts, " ")
+}
+
+func readAuthLoginInput(cmd *cobra.Command) (authLoginInput, bool, error) {
+	in := cmd.InOrStdin()
+	if file, ok := in.(*os.File); ok {
+		stat, err := file.Stat()
+		if err == nil && stat.Mode()&os.ModeCharDevice != 0 {
+			return authLoginInput{}, false, nil
+		}
+	}
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return authLoginInput{}, false, err
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return authLoginInput{}, false, nil
+	}
+	input, err := parseAuthLoginInput(data)
+	if err != nil {
+		return authLoginInput{}, false, err
+	}
+	return input, true, nil
+}
+
+func parseAuthLoginInput(data []byte) (authLoginInput, error) {
+	var input authLoginInput
+	if err := json.Unmarshal(data, &input); err == nil && authLoginInputHasTarget(input) {
+		return input, nil
+	}
+	if err := yaml.Unmarshal(data, &input); err == nil && authLoginInputHasTarget(input) {
+		return input, nil
+	}
+	input = parseAuthLoginKeyValueInput(string(data))
+	if authLoginInputHasTarget(input) {
+		return input, nil
+	}
+	return authLoginInput{}, fmt.Errorf("piped auth login input must include at least serviceName/service, issuer, or scope")
+}
+
+func parseAuthLoginKeyValueInput(raw string) authLoginInput {
+	var input authLoginInput
+	for _, line := range strings.Split(raw, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = normalizeAuthLoginInputKey(key)
+		value = strings.TrimSpace(value)
+		switch key {
+		case "contextname", "context":
+			input.ContextName = firstNonEmpty(input.ContextName, value)
+			input.Context = firstNonEmpty(input.Context, value)
+		case "servicename", "service":
+			input.ServiceName = firstNonEmpty(input.ServiceName, value)
+			input.Service = firstNonEmpty(input.Service, value)
+		case "issuer":
+			input.Issuer = value
+		case "scope", "platform":
+			input.Scope = value
+		case "authorizationendpoint":
+			input.AuthorizationEndpoint = value
+		case "tokenendpoint":
+			input.TokenEndpoint = value
+		case "redirecturl":
+			input.RedirectURL = value
+		case "clientid":
+			input.ClientID = value
+		case "flow":
+			input.Flow = value
+		}
+	}
+	return input
+}
+
+func normalizeAuthLoginInputKey(key string) string {
+	key = strings.TrimSpace(strings.ToLower(key))
+	key = strings.ReplaceAll(key, "_", "")
+	key = strings.ReplaceAll(key, "-", "")
+	return key
+}
+
+func authLoginInputHasTarget(input authLoginInput) bool {
+	return firstNonEmpty(input.ServiceName, input.Service, input.Issuer, input.Scope) != ""
+}
+
+func inputContextName(input authLoginInput) string {
+	return firstNonEmpty(input.ContextName, input.Context)
+}
+
+func mergeAuthLoginTokenService(cfg config.Config, serviceName string, input authLoginInput) (config.Config, bool) {
+	serviceName = firstNonEmpty(serviceName, "obp")
+	changed := cfg.CurrentService != serviceName
+	cfg.CurrentService = serviceName
+	service, found := findTokenService(cfg, serviceName)
+	if !found {
+		service, found = defaultTokenService(serviceName)
+	}
+	if !found {
+		service = config.TokenService{
+			Name: serviceName,
+			Type: config.TokenServiceTypeOAuth,
+		}
+	}
+	original := service
+	service.Name = serviceName
+	if service.Type == "" {
+		service.Type = config.TokenServiceTypeOAuth
+	}
+	if input.Issuer != "" {
+		service.Issuer = input.Issuer
+	}
+	if input.Scope != "" {
+		service.Scope = input.Scope
+	}
+	if input.AuthorizationEndpoint != "" {
+		service.AuthorizationEndpoint = input.AuthorizationEndpoint
+	}
+	if input.TokenEndpoint != "" {
+		service.TokenEndpoint = input.TokenEndpoint
+	}
+	if input.RedirectURL != "" {
+		service.RedirectURL = input.RedirectURL
+	}
+	if input.ClientID != "" {
+		service.ClientID = input.ClientID
+	}
+	if input.Flow != "" {
+		service.Flow = input.Flow
+	}
+	index := tokenServiceIndex(cfg.TokenServices, serviceName)
+	if index < 0 {
+		cfg.TokenServices = append(cfg.TokenServices, service)
+		return cfg, true
+	}
+	if tokenServicesEqual(original, service) {
+		return cfg, changed
+	}
+	cfg.TokenServices[index] = service
+	return cfg, true
+}
+
+func flagChanged(cmd *cobra.Command, name string) bool {
+	flag := cmd.Flag(name)
+	return flag != nil && flag.Changed
 }
 
 func commandNoInteractive(cmd *cobra.Command) bool {
@@ -680,12 +840,18 @@ func newAuthCmd() *cobra.Command {
 		},
 	})
 
-	cmd.AddCommand(&cobra.Command{
+	var loginService string
+	var loginNoBrowser bool
+	loginCmd := &cobra.Command{
 		Use:   "login",
-		Short: "Start login/bootstrap flow based on current auth method",
+		Short: "Start login/bootstrap flow based on current auth method or piped token-service defaults",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if commandNoInteractive(cmd) {
 				return interactiveDisabledError()
+			}
+			input, hasInput, err := readAuthLoginInput(cmd)
+			if err != nil {
+				return err
 			}
 			path, err := resolvePath(cmd)
 			if err != nil {
@@ -694,6 +860,44 @@ func newAuthCmd() *cobra.Command {
 			cfg, ctx, err := loadTarget(path)
 			if err != nil {
 				return err
+			}
+			if hasInput {
+				if inputContextName(input) != "" && !flagChanged(cmd, "context") {
+					ctx, err = cfg.GetContext(inputContextName(input))
+					if err != nil {
+						return err
+					}
+				}
+				serviceName := firstNonEmpty(loginService, input.ServiceName, input.Service, "obp")
+				tokenCfg, changed := mergeAuthLoginTokenService(cfg, serviceName, input)
+				if err := runAuthToken(cmd, tokenCfg, ctx, tokenServiceOptions{
+					Service:               serviceName,
+					Issuer:                input.Issuer,
+					ClientID:              input.ClientID,
+					Scope:                 input.Scope,
+					AuthorizationEndpoint: input.AuthorizationEndpoint,
+					TokenEndpoint:         input.TokenEndpoint,
+					RedirectURL:           input.RedirectURL,
+					Flow:                  input.Flow,
+				}, authTokenRunOptions{
+					NoBrowser:   loginNoBrowser,
+					LoginStatus: true,
+				}); err != nil {
+					return err
+				}
+				if changed {
+					return config.Save(path, tokenCfg)
+				}
+				return nil
+			}
+			serviceName := firstNonEmpty(loginService, cfg.CurrentService)
+			if serviceName != "" {
+				return runAuthToken(cmd, cfg, ctx, tokenServiceOptions{
+					Service: serviceName,
+				}, authTokenRunOptions{
+					NoBrowser:   loginNoBrowser,
+					LoginStatus: true,
+				})
 			}
 			method := config.NormalizeAuthMethod(ctx.AuthMethod)
 			switch method {
@@ -707,7 +911,10 @@ func newAuthCmd() *cobra.Command {
 				return fmt.Errorf("auth method %s does not support login flow; try `oci-context auth validate`", method)
 			}
 		},
-	})
+	}
+	loginCmd.Flags().StringVar(&loginService, "service", "", "Token service name for piped auth target defaults")
+	loginCmd.Flags().BoolVar(&loginNoBrowser, "no-browser", false, "Do not open the OAuth login URL in a browser")
+	cmd.AddCommand(loginCmd)
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "refresh",

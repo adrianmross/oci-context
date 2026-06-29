@@ -105,6 +105,7 @@ services in config when another tool should use a different issuer, client,
 scope, redirect URL, or flow:
 
 ```yaml
+current_service: obp
 token_services:
   - name: obp
     type: oauth
@@ -122,15 +123,47 @@ token_services:
     redirect_url_env: OCHAIN_OBP_AUTH_REDIRECT_URL
 ```
 
+With `current_service` set in a global or project-local `.oci-context.yml`,
+interactive service login does not need stdin or flags:
+
+```bash
+oci-context auth login
+oci-context auth token --no-login --format raw
+```
+
 `oci-idm` materializes `oci-context-token-services.yml` and
 `oci-context.handoff.json` files for planned Identity Domains apps. Import
 either handoff shape directly:
 
 ```bash
-oci-context auth service import \
-  --file ./idm-artifacts/oci-context-token-services.yml
+oci-context service add \
+  --file ./idm-artifacts/oci-context-token-services.yml \
+  --set-current
 
-oci-context auth service list
+oci-context service list
+```
+
+`oci-context auth service import --file ...` remains available for older
+scripts. The top-level `service add` command also reads stdin, which makes the
+auth-target handoff a plain JSON/YAML pipe:
+
+```bash
+oci-idm clone app --flow authorization-code --name hebe-obp-user |
+  oci-context service add --set-current
+
+oci-context auth login
+```
+
+`oci-idm get defaults` can also pipe the current target metadata directly into
+`oci-context auth login`. `oci-context` consumes the service name, issuer, and
+scope from stdin, merges those non-secret values into the named token service,
+then runs the interactive OAuth login and caches the resulting token:
+
+```bash
+oci-idm get defaults --service obp |
+  oci-context auth login
+
+oci-context auth token --service obp --no-login --format raw
 ```
 
 For the common Red Wiz OABCS target, select the OCI context for `oabcs1` in the
@@ -142,10 +175,14 @@ target and oci-context can own the browser login.
 
 For Oracle Identity Cloud Service domains that do not expose a Device Code
 endpoint, configure a CLI-capable IDCS application with Authorization Code and
-a loopback redirect URL, then force that flow locally:
+a loopback redirect URL, then either pipe target defaults into login or force
+the lower-level token flow locally:
 
 ```bash
 export OCHAIN_OBP_AUTH_REDIRECT_URL=http://127.0.0.1:8180/callback
+oci-idm get defaults --service obp |
+  oci-context auth login
+
 oci-context auth token \
   --service obp \
   --flow authorization-code \

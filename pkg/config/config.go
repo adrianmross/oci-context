@@ -18,6 +18,7 @@ type Config struct {
 	Contexts       []Context      `yaml:"contexts" json:"contexts"`
 	TokenServices  []TokenService `yaml:"token_services,omitempty" json:"token_services,omitempty"`
 	CurrentContext string         `yaml:"current_context" json:"current_context"`
+	CurrentService string         `yaml:"current_service,omitempty" json:"current_service,omitempty"`
 }
 
 // Options holds global settings.
