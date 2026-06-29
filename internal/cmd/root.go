@@ -70,6 +70,7 @@ func newRootCmd() *cobra.Command {
 		newListCmd(),
 		newCurrentCmd(),
 		newAuthCmd(),
+		newServiceCmd(),
 		newOCICmd(),
 		newUseCmd(),
 		newAddCmd(),

@@ -117,8 +117,12 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 				return err
 			}
 
-			request, err := resolveTokenServiceRequest(cfg, tokenServiceOptions{
-				Service:                service,
+			serviceName := service
+			if serviceName == "" && audience == "" {
+				serviceName = cfg.CurrentService
+			}
+			return runAuthToken(cmd, cfg, ctx, tokenServiceOptions{
+				Service:                serviceName,
 				Audience:               audience,
 				Issuer:                 issuer,
 				ClientID:               clientID,
@@ -146,61 +150,15 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 				JWTSubject:             jwtSubject,
 				JWTAudience:            jwtAudience,
 				JWTExpiresIn:           jwtExpiresIn,
+			}, authTokenRunOptions{
+				Format:    format,
+				NoLogin:   noLogin,
+				NoBrowser: noBrowser,
+				NoCache:   noCache,
 			})
-			if err != nil {
-				return err
-			}
-			cachePath, err := authTokenCachePath(cfg, request.Service, request.Issuer, request.ClientID, request.Scope)
-			if err != nil {
-				return err
-			}
-			var entry authTokenCacheEntry
-			if !noCache {
-				entry, err = readAuthTokenCache(cachePath)
-				if err == nil && authTokenUsable(entry) {
-					return printAuthToken(cmd, entry, format, ctx)
-				}
-				if err == nil && strings.TrimSpace(entry.RefreshToken) != "" {
-					refreshed, refreshErr := refreshOAuthToken(request, entry.RefreshToken)
-					if refreshErr == nil {
-						oldRefreshToken := entry.RefreshToken
-						entry = cacheEntryFromToken(request, refreshed)
-						entry.RefreshToken = firstNonEmpty(refreshed.RefreshToken, oldRefreshToken)
-						if err := writeAuthTokenCache(cachePath, entry); err != nil {
-							return err
-						}
-						return printAuthToken(cmd, entry, format, ctx)
-					}
-				}
-			}
-			if isNonInteractiveOAuthFlow(normalizeOAuthFlow(request.Flow)) {
-				entry, err = runOAuthNonInteractiveTokenFlow(request)
-				if err != nil {
-					return err
-				}
-				if !noCache {
-					if err := writeAuthTokenCache(cachePath, entry); err != nil {
-						return err
-					}
-				}
-				return printAuthToken(cmd, entry, format, ctx)
-			}
-			if noLogin || commandNoInteractive(cmd) {
-				return fmt.Errorf("no cached %s token is available; run `oci-context auth token --service %s` in an interactive shell", request.Service, request.Service)
-			}
-			entry, err = runOAuthLogin(cmd, request, !noBrowser)
-			if err != nil {
-				return err
-			}
-			if !noCache {
-				if err := writeAuthTokenCache(cachePath, entry); err != nil {
-					return err
-				}
-			}
-			return printAuthToken(cmd, entry, format, ctx)
 		},
 	}
-	cmd.Flags().StringVar(&service, "service", "obp", "Token service name")
+	cmd.Flags().StringVar(&service, "service", "", "Token service name (default current_service else obp)")
 	cmd.Flags().StringVar(&audience, "audience", "", "Deprecated alias for --service")
 	cmd.Flags().StringVar(&issuer, "issuer", "", "OAuth issuer URL")
 	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth public client id")
@@ -235,6 +193,14 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 	return cmd
 }
 
+type authTokenRunOptions struct {
+	Format      string
+	NoLogin     bool
+	NoBrowser   bool
+	NoCache     bool
+	LoginStatus bool
+}
+
 type tokenServiceOptions struct {
 	Service                string
 	Audience               string
@@ -264,6 +230,70 @@ type tokenServiceOptions struct {
 	JWTSubject             string
 	JWTAudience            string
 	JWTExpiresIn           time.Duration
+}
+
+func runAuthToken(cmd *cobra.Command, cfg config.Config, ctx config.Context, opts tokenServiceOptions, runOpts authTokenRunOptions) error {
+	request, err := resolveTokenServiceRequest(cfg, opts)
+	if err != nil {
+		return err
+	}
+	cachePath, err := authTokenCachePath(cfg, request.Service, request.Issuer, request.ClientID, request.Scope)
+	if err != nil {
+		return err
+	}
+	var entry authTokenCacheEntry
+	if !runOpts.NoCache {
+		entry, err = readAuthTokenCache(cachePath)
+		if err == nil && authTokenUsable(entry) {
+			return finishAuthTokenRun(cmd, entry, runOpts, ctx, "Token service %s is already logged in\n")
+		}
+		if err == nil && strings.TrimSpace(entry.RefreshToken) != "" {
+			refreshed, refreshErr := refreshOAuthToken(request, entry.RefreshToken)
+			if refreshErr == nil {
+				oldRefreshToken := entry.RefreshToken
+				entry = cacheEntryFromToken(request, refreshed)
+				entry.RefreshToken = firstNonEmpty(refreshed.RefreshToken, oldRefreshToken)
+				if err := writeAuthTokenCache(cachePath, entry); err != nil {
+					return err
+				}
+				return finishAuthTokenRun(cmd, entry, runOpts, ctx, "Refreshed token service %s\n")
+			}
+		}
+	}
+	if isNonInteractiveOAuthFlow(normalizeOAuthFlow(request.Flow)) {
+		entry, err = runOAuthNonInteractiveTokenFlow(request)
+		if err != nil {
+			return err
+		}
+		if !runOpts.NoCache {
+			if err := writeAuthTokenCache(cachePath, entry); err != nil {
+				return err
+			}
+		}
+		return finishAuthTokenRun(cmd, entry, runOpts, ctx, "Logged in token service %s\n")
+	}
+	if runOpts.NoLogin || commandNoInteractive(cmd) {
+		return fmt.Errorf("no cached %s token is available; run `oci-context auth token --service %s` in an interactive shell", request.Service, request.Service)
+	}
+	entry, err = runOAuthLogin(cmd, request, !runOpts.NoBrowser)
+	if err != nil {
+		return err
+	}
+	if !runOpts.NoCache {
+		if err := writeAuthTokenCache(cachePath, entry); err != nil {
+			return err
+		}
+	}
+	return finishAuthTokenRun(cmd, entry, runOpts, ctx, "Logged in token service %s\n")
+}
+
+func finishAuthTokenRun(cmd *cobra.Command, entry authTokenCacheEntry, runOpts authTokenRunOptions, ctx config.Context, statusFormat string) error {
+	if runOpts.LoginStatus {
+		fmt.Fprintf(cmd.OutOrStdout(), statusFormat, entry.Service)
+		return nil
+	}
+	format := firstNonEmpty(runOpts.Format, "raw")
+	return printAuthToken(cmd, entry, format, ctx)
 }
 
 type tokenServiceRequest struct {

@@ -9,6 +9,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type exportContextView struct {
+	config.Context
+	CurrentService string `json:"current_service,omitempty"`
+}
+
 func newExportCmd() *cobra.Command {
 	var cfgPath string
 	var useGlobal bool
@@ -70,7 +75,10 @@ func newExportCmd() *cobra.Command {
 			case "json":
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				if err := enc.Encode(ctx); err != nil {
+				if err := enc.Encode(exportContextView{
+					Context:        ctx,
+					CurrentService: cfg.CurrentService,
+				}); err != nil {
 					return err
 				}
 			default:

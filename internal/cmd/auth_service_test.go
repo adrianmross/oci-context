@@ -128,6 +128,59 @@ func TestAuthServiceImportOCIIDMJSONHandoffDryRun(t *testing.T) {
 	}
 }
 
+func TestServiceAddFromStdinSetsCurrentService(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	cfg := config.DefaultConfig(tmp)
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetIn(strings.NewReader(`{
+  "schemaVersion": "oci-idm.handoff.oci-context.v1",
+  "currentService": "hebe-obp-user",
+  "tokenServices": [
+    {
+      "name": "hebe-obp-user",
+      "type": "oauth",
+      "flow": "authorization-code",
+      "issuer": "https://idcs-example.identity.oraclecloud.com",
+      "authorizationEndpoint": "https://idcs-example.identity.oraclecloud.com/oauth2/v1/authorize",
+      "tokenEndpoint": "https://idcs-example.identity.oraclecloud.com/oauth2/v1/token",
+      "clientId": "hebe-obp-user",
+      "scope": "https://example-oabcs.blockchain.ocp.oraclecloud.com:7443/restproxy",
+      "redirectUrl": "http://127.0.0.1:8180/callback"
+    }
+  ]
+}`))
+	cmd.SetArgs([]string{"service", "add", "--config", cfgPath, "--set-current"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("service add: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "added: hebe-obp-user") || !strings.Contains(out.String(), "current_service: hebe-obp-user") {
+		t.Fatalf("unexpected service add output:\n%s", out.String())
+	}
+
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if loaded.CurrentService != "hebe-obp-user" {
+		t.Fatalf("expected current service hebe-obp-user, got %q", loaded.CurrentService)
+	}
+	service, ok := findTokenService(loaded, "hebe-obp-user")
+	if !ok {
+		t.Fatal("expected imported token service")
+	}
+	if service.ClientID != "hebe-obp-user" || service.Flow != "authorization-code" {
+		t.Fatalf("unexpected imported service: %+v", service)
+	}
+}
+
 func TestAuthServiceListRedactsSecrets(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")
