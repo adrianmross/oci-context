@@ -253,6 +253,9 @@ func TestServiceGetDefaultsToCurrentAndRedactsSecrets(t *testing.T) {
 	if view.Credential.Command != "oci-context" || strings.Join(view.Credential.Args, " ") != "auth token --service hebe-obp-user --no-login --format raw" {
 		t.Fatalf("unexpected credential command: %+v", view.Credential)
 	}
+	if view.InteractiveCredential == nil || view.InteractiveCredential.Command != "oci-context" || strings.Join(view.InteractiveCredential.Args, " ") != "auth token --service hebe-obp-user --format raw" {
+		t.Fatalf("unexpected interactive credential command: %+v", view.InteractiveCredential)
+	}
 }
 
 func TestServiceGetRequiresASelection(t *testing.T) {

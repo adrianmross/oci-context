@@ -172,7 +172,8 @@ oci-context service get
 `service get [name]` defaults to `current_service` and emits JSON by default.
 The document contains redacted OAuth metadata plus a structured `credential`
 command (`command` and `args`) that downstream tools can store without copying
-an access token. For example:
+an access token. Interactive flows also include `interactiveCredential`, which
+lets a downstream tool start login while discarding token stdout. For example:
 
 ```bash
 oci-context service get | brute auth apply -f -

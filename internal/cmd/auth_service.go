@@ -48,25 +48,26 @@ type handoffTokenServiceSpec struct {
 }
 
 type authServiceView struct {
-	Name                          string                       `json:"name" yaml:"name"`
-	Type                          string                       `json:"type,omitempty" yaml:"type,omitempty"`
-	Flow                          string                       `json:"flow,omitempty" yaml:"flow,omitempty"`
-	Issuer                        string                       `json:"issuer,omitempty" yaml:"issuer,omitempty"`
-	ClientID                      string                       `json:"client_id,omitempty" yaml:"client_id,omitempty"`
-	Scope                         string                       `json:"scope,omitempty" yaml:"scope,omitempty"`
-	RedirectURL                   string                       `json:"redirect_url,omitempty" yaml:"redirect_url,omitempty"`
-	TokenEndpoint                 string                       `json:"token_endpoint,omitempty" yaml:"token_endpoint,omitempty"`
-	AuthorizationEndpoint         string                       `json:"authorization_endpoint,omitempty" yaml:"authorization_endpoint,omitempty"`
-	ClientSecretConfigured        bool                         `json:"client_secret_configured" yaml:"client_secret_configured"`
-	ClientSecretEnv               string                       `json:"client_secret_env,omitempty" yaml:"client_secret_env,omitempty"`
-	PrivateKeyFileConfigured      bool                         `json:"private_key_file_configured" yaml:"private_key_file_configured"`
-	PrivateKeyFileEnv             string                       `json:"private_key_file_env,omitempty" yaml:"private_key_file_env,omitempty"`
-	AssertionCommandConfigured    bool                         `json:"assertion_command_configured" yaml:"assertion_command_configured"`
-	AssertionCommandEnv           string                       `json:"assertion_command_env,omitempty" yaml:"assertion_command_env,omitempty"`
-	SubjectTokenCommandEnv        string                       `json:"subject_token_command_env,omitempty" yaml:"subject_token_command_env,omitempty"`
-	SubjectTokenCommandConfigured bool                         `json:"subject_token_command_configured" yaml:"subject_token_command_configured"`
-	OfflineAccess                 bool                         `json:"offline_access" yaml:"offline_access"`
-	Credential                    authServiceCredentialCommand `json:"credential" yaml:"credential"`
+	Name                          string                        `json:"name" yaml:"name"`
+	Type                          string                        `json:"type,omitempty" yaml:"type,omitempty"`
+	Flow                          string                        `json:"flow,omitempty" yaml:"flow,omitempty"`
+	Issuer                        string                        `json:"issuer,omitempty" yaml:"issuer,omitempty"`
+	ClientID                      string                        `json:"client_id,omitempty" yaml:"client_id,omitempty"`
+	Scope                         string                        `json:"scope,omitempty" yaml:"scope,omitempty"`
+	RedirectURL                   string                        `json:"redirect_url,omitempty" yaml:"redirect_url,omitempty"`
+	TokenEndpoint                 string                        `json:"token_endpoint,omitempty" yaml:"token_endpoint,omitempty"`
+	AuthorizationEndpoint         string                        `json:"authorization_endpoint,omitempty" yaml:"authorization_endpoint,omitempty"`
+	ClientSecretConfigured        bool                          `json:"client_secret_configured" yaml:"client_secret_configured"`
+	ClientSecretEnv               string                        `json:"client_secret_env,omitempty" yaml:"client_secret_env,omitempty"`
+	PrivateKeyFileConfigured      bool                          `json:"private_key_file_configured" yaml:"private_key_file_configured"`
+	PrivateKeyFileEnv             string                        `json:"private_key_file_env,omitempty" yaml:"private_key_file_env,omitempty"`
+	AssertionCommandConfigured    bool                          `json:"assertion_command_configured" yaml:"assertion_command_configured"`
+	AssertionCommandEnv           string                        `json:"assertion_command_env,omitempty" yaml:"assertion_command_env,omitempty"`
+	SubjectTokenCommandEnv        string                        `json:"subject_token_command_env,omitempty" yaml:"subject_token_command_env,omitempty"`
+	SubjectTokenCommandConfigured bool                          `json:"subject_token_command_configured" yaml:"subject_token_command_configured"`
+	OfflineAccess                 bool                          `json:"offline_access" yaml:"offline_access"`
+	Credential                    authServiceCredentialCommand  `json:"credential" yaml:"credential"`
+	InteractiveCredential         *authServiceCredentialCommand `json:"interactiveCredential,omitempty" yaml:"interactiveCredential,omitempty"`
 }
 
 type authServiceCredentialCommand struct {
@@ -381,7 +382,7 @@ func tokenServicesEqual(a, b config.TokenService) bool {
 }
 
 func viewTokenService(service config.TokenService) authServiceView {
-	return authServiceView{
+	view := authServiceView{
 		Name:                          service.Name,
 		Type:                          service.Type,
 		Flow:                          service.Flow,
@@ -404,6 +405,22 @@ func viewTokenService(service config.TokenService) authServiceView {
 			Command: "oci-context",
 			Args:    []string{"auth", "token", "--service", service.Name, "--no-login", "--format", "raw"},
 		},
+	}
+	if isInteractiveTokenServiceFlow(service.Flow) {
+		view.InteractiveCredential = &authServiceCredentialCommand{
+			Command: "oci-context",
+			Args:    []string{"auth", "token", "--service", service.Name, "--format", "raw"},
+		}
+	}
+	return view
+}
+
+func isInteractiveTokenServiceFlow(flow string) bool {
+	switch strings.ToLower(strings.TrimSpace(flow)) {
+	case "", "auto", "authorization-code", "device", "oauth_device":
+		return true
+	default:
+		return false
 	}
 }
 
