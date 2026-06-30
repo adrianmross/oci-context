@@ -148,7 +148,8 @@ oci-context tool setup ochain -o shell
 ```
 
 The JSON payload includes `environment` entries such as `OCHAIN_TOKEN_COMMAND`
-and an `authProfiles` snippet suitable for OChain's XDG user config at
+and an `authProfiles` snippet with separate cached-token and interactive-login
+commands suitable for OChain's XDG user config at
 `${XDG_CONFIG_HOME:-$HOME/.config}/ochain/config.json`. Add `--include-token`
 for one-shot consumers that need an `OCHAIN_TOKEN` value in the payload:
 
