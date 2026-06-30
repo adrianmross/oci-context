@@ -10,7 +10,7 @@ import (
 	"github.com/adrianmross/oci-context/pkg/config"
 )
 
-func TestToolSetupOChainJSONUsesCurrentService(t *testing.T) {
+func TestToolSetupOChainDefaultsToJSONUsesCurrentService(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")
 	cfg := config.DefaultConfig(tmp)
@@ -23,7 +23,7 @@ func TestToolSetupOChainJSONUsesCurrentService(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--config", cfgPath, "tool", "setup", "ochain", "--json"})
+	cmd.SetArgs([]string{"--config", cfgPath, "tool", "setup", "ochain"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v\n%s", err, out.String())
@@ -62,7 +62,7 @@ func TestToolSetupOChainShellWithExplicitService(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--config", cfgPath, "tool", "setup", "ochain", "--shell", "--service", "obp"})
+	cmd.SetArgs([]string{"--config", cfgPath, "tool", "setup", "ochain", "-o", "shell", "--service", "obp"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v\n%s", err, out.String())
