@@ -211,3 +211,62 @@ func TestAuthServiceListRedactsSecrets(t *testing.T) {
 		t.Fatalf("expected secret configured marker:\n%s", out.String())
 	}
 }
+
+func TestServiceGetDefaultsToCurrentAndRedactsSecrets(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	cfg := config.DefaultConfig(tmp)
+	cfg.CurrentService = "hebe-obp-user"
+	cfg.TokenServices = append(cfg.TokenServices, config.TokenService{
+		Name:                  "hebe-obp-user",
+		Type:                  "oauth",
+		Flow:                  "authorization-code",
+		AuthorizationEndpoint: "https://idcs.example/oauth2/v1/authorize",
+		TokenEndpoint:         "https://idcs.example/oauth2/v1/token",
+		ClientID:              "client-id",
+		ClientSecret:          "do-not-print",
+		Scope:                 "https://obp.example/restproxy",
+		RedirectURL:           "http://127.0.0.1:8180/callback",
+	})
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"service", "get", "--config", cfgPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("get: %v\n%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "do-not-print") {
+		t.Fatalf("get output leaked secret:\n%s", out.String())
+	}
+	var view authServiceView
+	if err := json.Unmarshal(out.Bytes(), &view); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if view.Name != "hebe-obp-user" || view.Flow != "authorization-code" || !view.ClientSecretConfigured {
+		t.Fatalf("unexpected service view: %+v", view)
+	}
+	if view.Credential.Command != "oci-context" || strings.Join(view.Credential.Args, " ") != "auth token --service hebe-obp-user --no-login --format raw" {
+		t.Fatalf("unexpected credential command: %+v", view.Credential)
+	}
+	if view.InteractiveCredential == nil || view.InteractiveCredential.Command != "oci-context" || strings.Join(view.InteractiveCredential.Args, " ") != "auth token --service hebe-obp-user --format raw" {
+		t.Fatalf("unexpected interactive credential command: %+v", view.InteractiveCredential)
+	}
+}
+
+func TestServiceGetRequiresASelection(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"service", "get", "--config", cfgPath})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "no current token service") {
+		t.Fatalf("expected missing current service error, got %v", err)
+	}
+}

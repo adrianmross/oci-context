@@ -182,7 +182,7 @@ func TestAuthTokenOAuthAuthorizationCodeServiceCachesAndRefreshes(t *testing.T) 
 			query := r.URL.Query()
 			if query.Get("response_type") != "code" ||
 				query.Get("client_id") != "obp-native" ||
-				query.Get("scope") != "https://obp.example.com/restproxy" ||
+				query.Get("scope") != "https://obp.example.com/restproxy offline_access" ||
 				query.Get("code_challenge_method") != "S256" ||
 				query.Get("code_challenge") == "" {
 				t.Fatalf("unexpected authorization query: %v", query)
@@ -232,12 +232,13 @@ func TestAuthTokenOAuthAuthorizationCodeServiceCachesAndRefreshes(t *testing.T) 
 			SocketPath:    t.TempDir() + "/daemon.sock",
 		},
 		TokenServices: []config.TokenService{{
-			Name:     "chaincode-obp",
-			Type:     config.TokenServiceTypeOAuthDevice,
-			Issuer:   server.URL,
-			ClientID: "obp-native",
-			Scope:    "https://obp.example.com/restproxy",
-			Flow:     "authorization-code",
+			Name:          "chaincode-obp",
+			Type:          config.TokenServiceTypeOAuthDevice,
+			Issuer:        server.URL,
+			ClientID:      "obp-native",
+			Scope:         "https://obp.example.com/restproxy",
+			Flow:          "authorization-code",
+			OfflineAccess: true,
 		}},
 		Contexts: []config.Context{{
 			Name:        "dev",

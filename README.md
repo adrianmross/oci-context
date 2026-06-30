@@ -131,6 +131,13 @@ oci-context auth login
 oci-context auth token --no-login --format raw
 ```
 
+Set `offline_access: true` on a token service, or pass `--offline-access`, when
+both the OAuth client and resource app permit refresh tokens. `oci-context`
+then requests the standard `offline_access` scope, caches the rotating refresh
+token, and uses it for `--no-login` after access-token expiry. OBPCS-generated
+resource apps can reject offline access; leave it disabled for those services
+unless their resource configuration has been updated.
+
 For downstream CLIs that accept environment handoff payloads, `tool setup`
 prints the current token-service bridge without storing secrets in the
 downstream tool:
@@ -159,6 +166,17 @@ oci-context service add \
   --set-current
 
 oci-context service list
+oci-context service get
+```
+
+`service get [name]` defaults to `current_service` and emits JSON by default.
+The document contains redacted OAuth metadata plus a structured `credential`
+command (`command` and `args`) that downstream tools can store without copying
+an access token. Interactive flows also include `interactiveCredential`, which
+lets a downstream tool start login while discarding token stdout. For example:
+
+```bash
+oci-context service get | brute auth apply -f -
 ```
 
 `oci-context auth service import --file ...` remains available for older
