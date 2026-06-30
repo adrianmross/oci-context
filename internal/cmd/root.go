@@ -78,6 +78,7 @@ func newRootCmd() *cobra.Command {
 		newDeleteCmd(),
 		newStatusCmd(),
 		newSetupCmd(),
+		newToolCmd(),
 		newExportCmd(),
 		newImportCmd(),
 		newDaemonCmd(),
