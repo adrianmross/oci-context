@@ -19,6 +19,7 @@ type toolSetupEnvironmentEntry struct {
 
 type toolSetupAuthProfile struct {
 	TokenCommand string `json:"tokenCommand"`
+	LoginCommand string `json:"loginCommand,omitempty"`
 }
 
 type toolSetupPayload struct {
@@ -76,6 +77,7 @@ func newToolSetupOChainCmd() *cobra.Command {
 			}
 			serviceName := firstNonEmpty(service, cfg.CurrentService)
 			tokenCommand := buildOChainTokenCommand(service)
+			loginCommand := buildOChainLoginCommand(service)
 			payload := toolSetupPayload{
 				SchemaVersion: "oci-context.tool-setup.v1",
 				Tool:          "ochain",
@@ -83,7 +85,7 @@ func newToolSetupOChainCmd() *cobra.Command {
 				Profile:       profile,
 				TokenCommand:  tokenCommand,
 				AuthProfiles: map[string]toolSetupAuthProfile{
-					profile: {TokenCommand: tokenCommand},
+					profile: {TokenCommand: tokenCommand, LoginCommand: loginCommand},
 				},
 				Environment: []toolSetupEnvironmentEntry{
 					{Name: "OCHAIN_TOKEN_COMMAND", Value: tokenCommand, Secret: true},
@@ -114,11 +116,22 @@ func newToolSetupOChainCmd() *cobra.Command {
 }
 
 func buildOChainTokenCommand(service string) string {
+	return buildOChainAuthCommand(service, true)
+}
+
+func buildOChainLoginCommand(service string) string {
+	return buildOChainAuthCommand(service, false)
+}
+
+func buildOChainAuthCommand(service string, noLogin bool) string {
 	args := []string{"oci-context", "auth", "token"}
 	if strings.TrimSpace(service) != "" {
 		args = append(args, "--service", strings.TrimSpace(service))
 	}
-	args = append(args, "--no-login", "--format", "raw")
+	if noLogin {
+		args = append(args, "--no-login")
+	}
+	args = append(args, "--format", "raw")
 	return strings.Join(args, " ")
 }
 
