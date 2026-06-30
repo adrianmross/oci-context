@@ -70,6 +70,7 @@ type TokenService struct {
 	RedirectURLEnv            string   `yaml:"redirect_url_env,omitempty" json:"redirect_url_env,omitempty"`
 	RedirectURLEnvs           []string `yaml:"redirect_url_envs,omitempty" json:"redirect_url_envs,omitempty"`
 	Flow                      string   `yaml:"flow,omitempty" json:"flow,omitempty"`
+	OfflineAccess             bool     `yaml:"offline_access,omitempty" json:"offline_access,omitempty"`
 	Assertion                 string   `yaml:"assertion,omitempty" json:"assertion,omitempty"`
 	AssertionEnv              string   `yaml:"assertion_env,omitempty" json:"assertion_env,omitempty"`
 	AssertionEnvs             []string `yaml:"assertion_envs,omitempty" json:"assertion_envs,omitempty"`

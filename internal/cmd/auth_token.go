@@ -103,6 +103,7 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 	var noLogin bool
 	var noBrowser bool
 	var noCache bool
+	var offlineAccess bool
 
 	cmd := &cobra.Command{
 		Use:   "token",
@@ -150,6 +151,7 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 				JWTSubject:             jwtSubject,
 				JWTAudience:            jwtAudience,
 				JWTExpiresIn:           jwtExpiresIn,
+				OfflineAccess:          offlineAccess,
 			}, authTokenRunOptions{
 				Format:    format,
 				NoLogin:   noLogin,
@@ -190,6 +192,7 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 	cmd.Flags().BoolVar(&noLogin, "no-login", false, "Fail instead of starting an interactive login")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the verification URL in a browser")
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Bypass cached OAuth tokens and do not update the token cache")
+	cmd.Flags().BoolVar(&offlineAccess, "offline-access", false, "Request an OAuth refresh token with the offline_access scope")
 	return cmd
 }
 
@@ -230,6 +233,7 @@ type tokenServiceOptions struct {
 	JWTSubject             string
 	JWTAudience            string
 	JWTExpiresIn           time.Duration
+	OfflineAccess          bool
 }
 
 func runAuthToken(cmd *cobra.Command, cfg config.Config, ctx config.Context, opts tokenServiceOptions, runOpts authTokenRunOptions) error {
@@ -325,6 +329,7 @@ type tokenServiceRequest struct {
 	JWTSubject             string
 	JWTAudience            string
 	JWTExpiresIn           time.Duration
+	OfflineAccess          bool
 }
 
 func resolveTokenServiceRequest(cfg config.Config, opts tokenServiceOptions) (tokenServiceRequest, error) {
@@ -391,7 +396,8 @@ func resolveTokenServiceRequest(cfg config.Config, opts tokenServiceOptions) (to
 			envValues(serviceCfg.RedirectURLEnvs...),
 			serviceCfg.RedirectURL,
 		),
-		Flow: firstNonEmpty(opts.Flow, serviceCfg.Flow, "auto"),
+		Flow:          firstNonEmpty(opts.Flow, serviceCfg.Flow, "auto"),
+		OfflineAccess: opts.OfflineAccess || serviceCfg.OfflineAccess,
 		Assertion: firstNonEmpty(
 			opts.Assertion,
 			envValue(serviceCfg.AssertionEnv),
@@ -844,12 +850,25 @@ func buildAuthorizationURL(request tokenServiceRequest, redirectURL string, stat
 	query.Set("response_type", "code")
 	query.Set("client_id", request.ClientID)
 	query.Set("redirect_uri", redirectURL)
-	query.Set("scope", request.Scope)
+	query.Set("scope", authorizationCodeScope(request.Scope, request.OfflineAccess))
 	query.Set("state", state)
 	query.Set("code_challenge", challenge)
 	query.Set("code_challenge_method", "S256")
 	parsed.RawQuery = query.Encode()
 	return parsed.String(), nil
+}
+
+func authorizationCodeScope(scope string, offlineAccess bool) string {
+	fields := strings.Fields(scope)
+	if !offlineAccess {
+		return strings.Join(fields, " ")
+	}
+	for _, field := range fields {
+		if field == "offline_access" {
+			return strings.Join(fields, " ")
+		}
+	}
+	return strings.TrimSpace(strings.Join(append(fields, "offline_access"), " "))
 }
 
 func isCloudGateCallback(rawRedirectURL string) bool {
