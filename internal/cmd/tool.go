@@ -54,7 +54,6 @@ func newToolSetupOChainCmd() *cobra.Command {
 	var useGlobal bool
 	var output string
 	var shell bool
-	var jsonOutput bool
 	var includeToken bool
 	var service string
 	var profile string
@@ -101,14 +100,13 @@ func newToolSetupOChainCmd() *cobra.Command {
 					Secret: true,
 				})
 			}
-			return printToolSetupPayload(cmd, payload, output, shell, jsonOutput)
+			return printToolSetupPayload(cmd, payload, output, shell)
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	cmd.Flags().BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
 	cmd.Flags().StringVarP(&output, "output", "o", "json", "Output format: json|shell")
 	cmd.Flags().BoolVar(&shell, "shell", false, "Print shell exports")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON output")
 	cmd.Flags().BoolVar(&includeToken, "include-token", false, "Include a current access token in the setup payload")
 	cmd.Flags().StringVar(&service, "service", "", "Token service name for generated commands (default current_service)")
 	cmd.Flags().StringVar(&profile, "profile", "oci-context-obp", "OChain auth profile name")
@@ -151,15 +149,12 @@ func runToolSetupToken(cmd *cobra.Command, cfg config.Config, service string) (s
 	return token, nil
 }
 
-func printToolSetupPayload(cmd *cobra.Command, payload toolSetupPayload, output string, shell bool, jsonOutput bool) error {
+func printToolSetupPayload(cmd *cobra.Command, payload toolSetupPayload, output string, shell bool) error {
 	if shell || strings.EqualFold(output, "shell") {
 		for _, entry := range payload.Environment {
 			fmt.Fprintf(cmd.OutOrStdout(), "export %s=%s\n", entry.Name, strconv.Quote(entry.Value))
 		}
 		return nil
-	}
-	if jsonOutput {
-		output = "json"
 	}
 	switch strings.ToLower(strings.TrimSpace(output)) {
 	case "", "json":

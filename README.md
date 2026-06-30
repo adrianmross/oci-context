@@ -136,8 +136,8 @@ prints the current token-service bridge without storing secrets in the
 downstream tool:
 
 ```bash
-oci-context tool setup ochain --json
-oci-context tool setup ochain --shell
+oci-context tool setup ochain
+oci-context tool setup ochain -o shell
 ```
 
 The JSON payload includes `environment` entries such as `OCHAIN_TOKEN_COMMAND`
@@ -146,7 +146,7 @@ and an `authProfiles` snippet suitable for OChain's XDG user config at
 for one-shot consumers that need an `OCHAIN_TOKEN` value in the payload:
 
 ```bash
-oci-context tool setup ochain --json --include-token
+oci-context tool setup ochain --include-token
 ```
 
 `oci-idm` materializes `oci-context-token-services.yml` and
