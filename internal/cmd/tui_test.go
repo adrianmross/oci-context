@@ -1110,3 +1110,25 @@ func TestTUIBackspaceAtCompartmentRootReturnsToTenancies(t *testing.T) {
 		t.Fatalf("expected to return to tenancies from root, got %s", res.mode)
 	}
 }
+
+func TestTUICompartmentRootIncludesSelectableRoot(t *testing.T) {
+	ci := newTestContextItem()
+	cfg := config.Config{Options: config.Options{OCIConfigPath: "/tmp/oci"}, Contexts: []config.Context{ci.Context}}
+	m := newTuiModel(cfg, "", []list.Item{ci}, nil, "")
+	m.mode = "compartments"
+	m.ctxItem = ci
+	m.parentID = ci.TenancyOCID
+
+	model, _ := m.Update(compResultMsg{parent: ci.TenancyOCID, items: []compItem{{oc: oci.Compartment{ID: "ocid1.compartment.oc1..child", Name: "child", Parent: ci.TenancyOCID, Status: "ACTIVE"}}}})
+	res := model.(tuiModel)
+	item, ok := res.comps.SelectedItem().(compItem)
+	if !ok || item.oc.ID != ci.TenancyOCID || item.oc.Name != "↳ root" {
+		t.Fatalf("expected selectable root item first, got %#v", res.comps.SelectedItem())
+	}
+
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeySpace})
+	res = model.(tuiModel)
+	if res.pendingSelectionID != ci.TenancyOCID {
+		t.Fatalf("expected root compartment to stage tenancy ID, got %q", res.pendingSelectionID)
+	}
+}
