@@ -2144,7 +2144,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.parentMap[it.oc.ID] = it.oc.Parent
 			m.nameMap[it.oc.ID] = it.oc.Name
 		}
-		m.comps.SetItems(toList(res.items))
+		m.comps.SetItems(toList(rootCompartmentItems(res.parent, m.ctxItem.TenancyOCID, res.items)))
 		m.comps.Title = fmt.Sprintf("Select compartment under %s", res.parent)
 		if len(res.items) == 0 {
 			m.status = "Leaf compartment: press backspace/delete to go up, or Enter/Space/Ctrl+S to keep current."
@@ -3293,4 +3293,11 @@ func toList(items []compItem) []list.Item {
 		out[i] = it
 	}
 	return out
+}
+
+func rootCompartmentItems(parent, tenancy string, items []compItem) []compItem {
+	if parent != tenancy {
+		return items
+	}
+	return append([]compItem{{oc: oci.Compartment{ID: tenancy, Name: "↳ root", Parent: tenancy, Status: "ACTIVE"}}}, items...)
 }
