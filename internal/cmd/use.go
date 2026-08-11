@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/adrianmross/oci-context/pkg/config"
 	"github.com/spf13/cobra"
 )
@@ -34,7 +36,11 @@ func newUseCmd() *cobra.Command {
 			if err := config.Save(path, cfg); err != nil {
 				return err
 			}
-			return syncOCIDefaultsForCurrent(cfg)
+			if err := syncOCIDefaultsForCurrent(cfg); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.ErrOrStderr(), `Run: eval "$(oci-context export --format env)"`)
+			return nil
 		},
 	}
 
