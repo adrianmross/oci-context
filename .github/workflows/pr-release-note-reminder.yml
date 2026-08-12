@@ -1,0 +1,47 @@
+name: Release note reminder
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  remind:
+    if: >-
+      !contains(github.event.pull_request.title, '[no-release]') &&
+      !contains(github.event.pull_request.body, '[no-release]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check release note intent
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const title = pr.title;
+            const releaseTitle = /^(feat|fix|perf|refactor|revert)(\([^)]*\))?!?:/.test(title);
+            if (!releaseTitle) return;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number: pr.number, per_page: 100
+            });
+            const hasFragment = files.some(({ filename }) =>
+              filename.startsWith('.changelogs/') &&
+              filename !== '.changelogs/README.md' &&
+              filename !== '.changelogs/config.json'
+            );
+            if (hasFragment) return;
+
+            const marker = '<!-- release-note-reminder -->';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: pr.number, per_page: 100
+            });
+            if (comments.some(({ body = '' }) => body.includes(marker))) return;
+
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: pr.number,
+              body: `${marker}\n\nThis PR looks release-bearing, but it has no changelogger fragment. If that is intentional, add **[no-release]** to the PR title or body. Otherwise run \\`changelogger\\` and commit the generated \`.changelogs/*\\` file. This is a reminder only; it does not block the PR.`
+            });
