@@ -53,6 +53,12 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 - Release behavior is tag-driven: `v*` tags publish through GoReleaser, and the
   `auto-release` workflow can create semantic tags from Conventional Commit
   subjects on `main` while skipping commits that modify workflows.
+- A successful stable Release automatically updates and smoke-tests the public
+  Homebrew tap. Configure the repository secret `HOMEBREW_TAP_TOKEN` with
+  contents-write access to `adrianmross/homebrew-tap`.
+- Release-note reminders are advisory: release-bearing PRs without a
+  `.changelogs/*` fragment receive a bot comment; add `[no-release]` when no
+  release note or version bump is intended.
 
 ## Demo Assets
 - The README terminal capture is generated from `docs/demo/oci-context.tape` with VHS.

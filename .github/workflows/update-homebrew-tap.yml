@@ -1,0 +1,84 @@
+name: Update Homebrew tap
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish to the tap
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Resolve release tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Verify published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease \
+            --jq 'if .isDraft or .isPrerelease then error("release is not stable") else "stable" end'
+
+      - name: Check out tap
+        uses: actions/checkout@v4
+        with:
+          repository: adrianmross/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update and verify formula
+        working-directory: tap
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          archive_url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+          sha256="$(curl -fsSL "$archive_url" | sha256sum | awk '{print $1}')"
+          sed -i -E "s#^  url .*#  url \"${archive_url}\"#" Formula/oci-context.rb
+          sed -i -E "s#^  sha256 .*#  sha256 \"${sha256}\"#" Formula/oci-context.rb
+          grep -F "archive/refs/tags/${TAG}.tar.gz" Formula/oci-context.rb
+          grep -F "sha256 \"${sha256}\"" Formula/oci-context.rb
+          if git diff --quiet -- Formula/oci-context.rb; then
+            echo "Formula already up to date for ${TAG}."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/oci-context.rb
+          git commit -m "chore(oci-context): update formula to ${TAG}"
+          git push origin main
+
+  smoke:
+    needs: update
+    runs-on: macos-latest
+    steps:
+      - name: Install and test tap formula
+        env:
+          TAG: ${{ needs.update.outputs.tag }}
+        run: |
+          set -euo pipefail
+          brew tap adrianmross/tap https://github.com/adrianmross/homebrew-tap.git
+          brew update
+          brew audit --formula oci-context --tap=adrianmross/tap
+          brew reinstall --build-from-source adrianmross/tap/oci-context
+          brew test adrianmross/tap/oci-context
+          installed="$(oci-context version -o json)"
+          echo "$installed"
+          grep -F "\"version\": \"${TAG#v}\"" <<< "$installed"
