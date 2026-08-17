@@ -16,6 +16,7 @@ import (
 	"github.com/adrianmross/oci-context/pkg/oci"
 	"github.com/adrianmross/oci-context/pkg/ocicfg"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -1137,6 +1138,7 @@ type tuiModel struct {
 	finalized          bool
 	crumb              string
 	regionSet          bool
+	nameInput          textinput.Model
 	regionCache        map[string][]string // context name -> regions
 	pendingSelectionID string              // compartment pending ID
 	pendingSelectionNm string              // compartment pending name
@@ -1571,6 +1573,124 @@ func (m tuiModel) switchToMenu(target string) (tuiModel, tea.Cmd, bool) {
 	}
 }
 
+func (m tuiModel) beginCreateContext() (tuiModel, tea.Cmd) {
+	base, ok := m.createBaseContext()
+	if !ok {
+		m.status = "Select a context first"
+		return m, nil
+	}
+	candidate := base
+	if m.pendingTenancyOCID != "" {
+		candidate.TenancyOCID = m.pendingTenancyOCID
+	}
+	if m.pendingSelectionID != "" {
+		candidate.CompartmentOCID = m.pendingSelectionID
+	}
+	if m.pendingRegion != "" {
+		candidate.Region = m.pendingRegion
+	}
+	if m.pendingAuthMethod != "" {
+		candidate.AuthMethod = config.NormalizeAuthMethod(m.pendingAuthMethod)
+	}
+	if m.pendingUser != "" {
+		candidate.User = strings.TrimSpace(m.pendingUser)
+	}
+	candidate.Name = cloneContextName(candidate.Name, m.cfg)
+	m.ctxItem = contextItem{Context: candidate}
+	m.nameInput = textinput.New()
+	m.nameInput.Prompt = "New context name: "
+	m.nameInput.CharLimit = 128
+	m.nameInput.Width = 48
+	m.nameInput.SetValue(candidate.Name)
+	m.mode = "create"
+	m.status = "Rename the clone, then press Enter to create (Esc cancels)"
+	return m, m.nameInput.Focus()
+}
+
+func (m tuiModel) createBaseContext() (config.Context, bool) {
+	if m.pendingContextName != "" {
+		for _, item := range m.list.Items() {
+			if ctx, ok := item.(contextItem); ok && ctx.Name == m.pendingContextName {
+				return ctx.Context, true
+			}
+		}
+	}
+	if item, ok := m.list.SelectedItem().(contextItem); ok {
+		return item.Context, true
+	}
+	if m.ctxItem.Name != "" {
+		return m.ctxItem.Context, true
+	}
+	if m.cfg.CurrentContext != "" {
+		ctx, err := m.cfg.GetContext(m.cfg.CurrentContext)
+		if err == nil {
+			return ctx, true
+		}
+	}
+	return config.Context{}, false
+}
+
+func cloneContextName(base string, cfg config.Config) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "context"
+	}
+	name := base + "-clone"
+	for i := 2; ; i++ {
+		if _, err := cfg.GetContext(name); err != nil {
+			return name
+		}
+		name = fmt.Sprintf("%s-%d", base, i)
+	}
+}
+
+func (m tuiModel) updateCreateName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = "contexts"
+		m.status = "Create cancelled"
+		return m, nil
+	case "enter":
+		name := strings.TrimSpace(m.nameInput.Value())
+		if name == "" {
+			m.status = "Context name is required"
+			return m, nil
+		}
+		if _, err := m.cfg.GetContext(name); err == nil {
+			m.status = fmt.Sprintf("Context %s already exists", name)
+			return m, nil
+		}
+		candidate := m.ctxItem.Context
+		candidate.Name = name
+		if err := candidate.Validate(); err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		m.cfg.CurrentContext = name
+		if err := m.cfg.UpsertContext(candidate); err != nil {
+			m.err = err
+			return m, tea.Quit
+		}
+		if err := config.Save(m.cfgPath, m.cfg); err != nil {
+			m.err = err
+			return m, tea.Quit
+		}
+		if err := syncOCIDefaultsForCurrent(m.cfg); err != nil {
+			m.err = err
+			return m, tea.Quit
+		}
+		m.ctxItem.Name = name
+		m.selected = name
+		m.parentID = candidate.CompartmentOCID
+		m.finalized = true
+		return m, tea.Quit
+	default:
+		var cmd tea.Cmd
+		m.nameInput, cmd = m.nameInput.Update(msg)
+		return m, cmd
+	}
+}
+
 func (m tuiModel) cycleMenu(forward bool) (tea.Model, tea.Cmd) {
 	order := []string{"contexts", "tenancies", "compartments", "regions", "auth", "users"}
 	cur := 0
@@ -1608,6 +1728,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.resizeListsForViewport()
 	case tea.KeyMsg:
+		if m.mode == "create" {
+			return m.updateCreateName(msg)
+		}
 		// In wide mode, navigate active list as a grid with arrows or vim keys.
 		if m.shouldUseGridLayout() && m.moveActiveSelectionGrid(msg.String()) {
 			return m, nil
@@ -1916,6 +2039,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.loadRegionsCmd(item)
 				}
 			}
+		case "n":
+			if m.mode == "contexts" {
+				return m.beginCreateContext()
+			}
 		case "a":
 			if m.mode == "contexts" {
 				if nm, cmd, ok := m.switchToMenu("auth"); ok {
@@ -2208,7 +2335,7 @@ func (m tuiModel) View() string {
 		return fmt.Sprintf("Selected context %s with compartment %s\n", m.ctxItem.Name, m.parentID)
 	}
 	panelContent := m.activeListView()
-	if m.activeListFilterState() == list.Unfiltered {
+	if m.mode != "create" && m.activeListFilterState() == list.Unfiltered {
 		gap := "\n"
 		if m.height >= 18 {
 			gap = "\n\n"
@@ -2265,6 +2392,8 @@ func (m tuiModel) activeListView() string {
 		return m.renderActiveGrid()
 	}
 	switch m.mode {
+	case "create":
+		return m.nameInput.View()
 	case "contexts":
 		l := m.list
 		if l.FilterState() == list.Unfiltered {
@@ -2318,6 +2447,8 @@ func (m tuiModel) activeListView() string {
 
 func (m tuiModel) activeListModel() list.Model {
 	switch m.mode {
+	case "create":
+		return m.list
 	case "contexts":
 		return m.list
 	case "tenancies":
@@ -2335,6 +2466,8 @@ func (m tuiModel) activeListModel() list.Model {
 
 func (m tuiModel) activeListFilterState() list.FilterState {
 	switch m.mode {
+	case "create":
+		return list.Unfiltered
 	case "contexts":
 		return m.list.FilterState()
 	case "tenancies":
@@ -2513,7 +2646,7 @@ func (m tuiModel) effectiveGridLayout() bool {
 }
 
 func (m tuiModel) gridAllowedInCurrentState() bool {
-	if m.ultraCompact || m.helpVisible || m.width < 96 || m.isFilteringActive() {
+	if m.mode == "create" || m.ultraCompact || m.helpVisible || m.width < 96 || m.isFilteringActive() {
 		return false
 	}
 	return len(m.activeGridItems()) > 0
@@ -2892,9 +3025,9 @@ func (m tuiModel) shouldInlineHotkeys() bool {
 
 func primaryHotkeys(compact bool) string {
 	if compact {
-		return "enter/backspace drill/up • space stage • / filter • a auth • u user • v verbose • m matrix • q save • ? help"
+		return "n create • enter/backspace drill/up • space stage • / filter • a auth • u user • v verbose • m matrix • q save • ? help"
 	}
-	return "enter/backspace drill/up • space stage • / filter • a auth • u user • v verbose • m matrix • q save • ? help"
+	return "n create • enter/backspace drill/up • space stage • / filter • a auth • u user • v verbose • m matrix • q save • ? help"
 }
 
 func inlineStateSummary(m tuiModel) string {
@@ -2928,6 +3061,7 @@ func (m tuiModel) renderHelpPanel() string {
 		"Keys",
 		"Enter/right: drill or apply",
 		"Space: stage selection",
+		"n: create a named clone from the selected/staged values",
 		"Ctrl+S or q: save and quit",
 		"Esc or Ctrl+C: quit without saving",
 		"/: filter current list",
@@ -2937,12 +3071,12 @@ func (m tuiModel) renderHelpPanel() string {
 		"?: toggle this help panel",
 		"",
 		"Mode Navigation",
-		"profiles: r regions • c compartments • t tenancies • a auth • u users",
+		"profiles: n new • r regions • c compartments • t tenancies • a auth • u users",
 		"submenus: R regions • C compartments • T tenancies • A auth • U users • P profiles",
 	}
 	if m.width > 0 && m.width < 72 {
 		lines = []string{
-			"Keys: enter drill, space stage, q save, esc quit, / filter, ? help",
+			"Keys: n create, enter drill, space stage, q save, esc quit, / filter, ? help",
 			"Switch: r/c/t/a/u in profiles, R/C/T/A/U/P in submenus",
 		}
 	}

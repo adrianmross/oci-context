@@ -63,9 +63,16 @@ Create or update local config:
 
 ```bash
 oci-context init
-oci-context add
+oci-context create dev \
+  --compartment ocid1.compartment.oc1..bbbb \
+  --region us-phoenix-1
 oci-context use dev
 ```
+
+`create` inherits the tenancy, user, and API-key profile from
+`options.default_profile` (or the OCI `DEFAULT` profile), so only the new
+context name and target compartment/region are needed. Use `--profile` to
+choose another OCI CLI profile. `add` remains an alias.
 
 Check the active context:
 
@@ -394,7 +401,7 @@ oci-context init
 oci-context list
 oci-context current
 oci-context use <name>
-oci-context add
+oci-context create [name]
 oci-context set <name> --field value
 oci-context delete <name>
 oci-context status --cached -o json
@@ -510,6 +517,7 @@ defaults automatically.
 - `Ctrl+S` or `q` saves
 - `Esc` or `Ctrl+C` quits without saving
 - `backspace` goes back
+- `n` opens a name prompt to create a clone from the selected context and any staged region, compartment, auth, tenancy, or user values
 - main menu hotkeys are lowercase: `r`, `c`, `t`
 - submenu hotkeys are uppercase: `R`, `C`, `T`, `P`
 
