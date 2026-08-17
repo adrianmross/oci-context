@@ -55,6 +55,55 @@ func TestTUIQuitSavesOnQ(t *testing.T) {
 	}
 }
 
+func TestTUICreatesNamedCloneFromSelectedAndStagedValues(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	base := newTestContextItem()
+	cfg := config.Config{
+		Options:        config.Options{OCIConfigPath: filepath.Join(tmp, "oci-config")},
+		Contexts:       []config.Context{base.Context},
+		CurrentContext: base.Name,
+	}
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	m := newTuiModel(cfg, cfgPath, []list.Item{base}, nil, "")
+	m.pendingContextName = base.Name
+	m.pendingRegion = "us-ashburn-1"
+	m.pendingSelectionID = "ocid1.compartment.oc1..new"
+	m.pendingAuthMethod = config.AuthMethodAPIKey
+	m.pendingUser = "ocid1.user.oc1..new"
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	res := model.(tuiModel)
+	if res.mode != "create" || res.nameInput.Value() != "dev-clone" {
+		t.Fatalf("expected clone name prompt, got mode=%s name=%q", res.mode, res.nameInput.Value())
+	}
+	res.nameInput.SetValue("ashburn-dev")
+	model, _ = res.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	res = model.(tuiModel)
+	if !res.finalized || res.selected != "ashburn-dev" {
+		t.Fatalf("expected named clone to finalize, got finalized=%v selected=%q", res.finalized, res.selected)
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	clone, err := got.GetContext("ashburn-dev")
+	if err != nil {
+		t.Fatalf("get clone: %v", err)
+	}
+	if clone.Region != "us-ashburn-1" || clone.CompartmentOCID != "ocid1.compartment.oc1..new" || clone.User != "ocid1.user.oc1..new" {
+		t.Fatalf("staged values were not applied: %+v", clone)
+	}
+	unchanged, err := got.GetContext("dev")
+	if err != nil || unchanged.Region != base.Region || unchanged.CompartmentOCID != base.CompartmentOCID {
+		t.Fatalf("base context changed: %+v err=%v", unchanged, err)
+	}
+}
+
 func TestTUIEscQuitsWithoutSave(t *testing.T) {
 	ci := newTestContextItem()
 	cfg := config.Config{
