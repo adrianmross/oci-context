@@ -81,6 +81,7 @@ func newRootCmd() *cobra.Command {
 		newToolCmd(),
 		newExportCmd(),
 		newImportCmd(),
+		newDeviceCmd(),
 		newDaemonCmd(),
 		newDoctorCmd(),
 		newTuiCmd(),

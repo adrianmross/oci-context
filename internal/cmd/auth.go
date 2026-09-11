@@ -690,6 +690,110 @@ func newAuthCmd() *cobra.Command {
 	cmd.AddCommand(newAuthTokenCmd(resolvePath, loadTarget))
 	cmd.AddCommand(newAuthServiceCmd(resolvePath))
 
+	var bootstrapProfile, publicKeyFile string
+	promoteCmd := &cobra.Command{
+		Use:   "promote-api-key",
+		Short: "Upload an API key using a temporary session and switch the context",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := resolvePath(cmd)
+			if err != nil {
+				return err
+			}
+			cfg, ctx, err := loadTarget(path)
+			if err != nil {
+				return err
+			}
+			if bootstrapProfile == "" {
+				return fmt.Errorf("--from-profile is required")
+			}
+			if publicKeyFile == "" {
+				keyPath, err := profileKeyPath(cfg.Options.OCIConfigPath, ctx.Profile)
+				if err != nil {
+					return err
+				}
+				publicKeyFile = strings.TrimSuffix(keyPath, ".pem") + "_public.pem"
+			}
+			if ctx.User == "" {
+				return fmt.Errorf("context %s has no user OCID", ctx.Name)
+			}
+			if err := runOCIForAuth(cmd, []string{
+				"iam", "user", "api-key", "upload",
+				"--user-id", ctx.User,
+				"--key-file", publicKeyFile,
+				"--profile", bootstrapProfile,
+				"--auth", config.AuthMethodSecurityToken,
+				"--region", ctx.Region,
+			}); err != nil {
+				return fmt.Errorf("upload API key: %w", err)
+			}
+			ctx.AuthMethod = config.AuthMethodAPIKey
+			if err := cfg.UpsertContext(ctx); err != nil {
+				return err
+			}
+			if err := config.Save(path, cfg); err != nil {
+				return err
+			}
+			if ctx.Name == cfg.CurrentContext {
+				if err := syncOCIDefaultsForCurrent(cfg); err != nil {
+					return err
+				}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Uploaded API key and switched %s to api_key\n", ctx.Name)
+			return nil
+		},
+	}
+	promoteCmd.Flags().StringVar(&bootstrapProfile, "from-profile", "", "OCI session-token profile used to upload the key")
+	promoteCmd.Flags().StringVar(&publicKeyFile, "public-key-file", "", "PEM public API key to upload")
+	cmd.AddCommand(promoteCmd)
+
+	keysCmd := &cobra.Command{Use: "keys", Short: "Manage OCI API signing keys"}
+	keysCmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List keys for the selected context user",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := resolvePath(cmd)
+			if err != nil {
+				return err
+			}
+			_, ctx, err := loadTarget(path)
+			if err != nil {
+				return err
+			}
+			ociArgs := []string{"iam", "user", "api-key", "list", "--user-id", ctx.User, "--profile", ctx.Profile, "--region", ctx.Region}
+			if config.NormalizeAuthMethod(ctx.AuthMethod) == config.AuthMethodSecurityToken {
+				ociArgs = append(ociArgs, "--auth", config.AuthMethodSecurityToken)
+			}
+			return runOCIForAuth(cmd, ociArgs)
+		},
+	})
+	var keyID string
+	var confirm bool
+	revokeCmd := &cobra.Command{
+		Use:   "revoke",
+		Short: "Delete an API signing key",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !confirm {
+				return fmt.Errorf("--confirm is required to revoke a key")
+			}
+			path, err := resolvePath(cmd)
+			if err != nil {
+				return err
+			}
+			_, ctx, err := loadTarget(path)
+			if err != nil {
+				return err
+			}
+			if keyID == "" {
+				return fmt.Errorf("--key-id is required")
+			}
+			return runOCIForAuth(cmd, []string{"iam", "user", "api-key", "delete", "--user-id", ctx.User, "--key-id", keyID, "--profile", ctx.Profile, "--region", ctx.Region})
+		},
+	}
+	revokeCmd.Flags().StringVar(&keyID, "key-id", "", "API key OCID")
+	revokeCmd.Flags().BoolVar(&confirm, "confirm", false, "Confirm deletion")
+	keysCmd.AddCommand(revokeCmd)
+	cmd.AddCommand(keysCmd)
+
 	var showOutput string
 	showCmd := &cobra.Command{
 		Use:   "show",

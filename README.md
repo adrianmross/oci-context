@@ -509,6 +509,32 @@ This sets:
 After that, `oci-context use ...` and TUI saves refresh the managed OCI CLI
 defaults automatically.
 
+## Device bundles
+
+Create a local, non-secret bundle for another device:
+
+```bash
+oci-context device export --global --output ./oci-context-device
+```
+
+For an explicitly approved private-key transfer, add
+`--include-private-key`. The bundle never includes security-token files; run
+`oci session authenticate` or `oci setup config` on the destination when a key
+is not included.
+
+To promote a generated API key with a still-valid session profile:
+
+```bash
+oci-context auth promote-api-key \
+  --global \
+  --context lehighcap26 \
+  --from-profile lehighcap26 \
+  --public-key-file ~/.oci/oci_api_key_public.pem
+```
+
+The command uploads the key through OCI CLI and switches only the selected
+context to `api_key`; it does not upload or transmit private-key material.
+
 ## TUI Controls
 
 - `/` starts filtering
