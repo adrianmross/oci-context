@@ -29,7 +29,7 @@ func TestUsePrintsEnvironmentReminder(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("expected no stdout, got %q", stdout.String())
 	}
-	if got := stderr.String(); !strings.Contains(got, `eval "$(oci-context export --format env)"`) {
+	if got := stderr.String(); !strings.Contains(got, `eval "$(oci-context export)"`) {
 		t.Fatalf("expected environment reminder, got %q", got)
 	}
 }

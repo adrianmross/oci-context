@@ -39,7 +39,7 @@ func newUseCmd() *cobra.Command {
 			if err := syncOCIDefaultsForCurrent(cfg); err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.ErrOrStderr(), `Run: eval "$(oci-context export --format env)"`)
+			fmt.Fprintln(cmd.ErrOrStderr(), `Run: eval "$(oci-context export)"`)
 			return nil
 		},
 	}

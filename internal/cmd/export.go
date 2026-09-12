@@ -16,12 +16,12 @@ type exportContextView struct {
 
 func newExportCmd() *cobra.Command {
 	var cfgPath string
-	var useGlobal bool
-	var format string
+	var useGlobal, archive, includePrivateKey bool
+	var output, file, format string
 
 	cmd := &cobra.Command{
 		Use:   "export",
-		Short: "Export current context as env or json",
+		Short: "Export current context as env, json, or device archive",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useGlobal, err := cmd.Flags().GetBool("global")
 			if err != nil {
@@ -38,12 +38,21 @@ func newExportCmd() *cobra.Command {
 			if cfg.CurrentContext == "" {
 				return fmt.Errorf("no current context set")
 			}
+			if format != "" {
+				output = format
+			}
+			if archive || output == "archive" {
+				if file == "" {
+					file = cfg.CurrentContext + ".ocix.tar.gz"
+				}
+				return runDeviceExport(cmd, cfgPath, useGlobal, "", file, includePrivateKey, true)
+			}
 			ctx, err := cfg.GetContext(cfg.CurrentContext)
 			if err != nil {
 				return err
 			}
 
-			switch format {
+			switch output {
 			case "env", "":
 				lines := []string{}
 				if ctx.Profile != "" {
@@ -82,7 +91,7 @@ func newExportCmd() *cobra.Command {
 					return err
 				}
 			default:
-				return fmt.Errorf("unsupported format: %s", format)
+				return fmt.Errorf("unsupported format: %s", output)
 			}
 			return nil
 		},
@@ -90,6 +99,10 @@ func newExportCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	cmd.Flags().BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
-	cmd.Flags().StringVarP(&format, "format", "f", "env", "Output format: env|json|oci-env")
+	cmd.Flags().StringVarP(&output, "output", "o", "env", "Output format: env|json|oci-env|archive")
+	cmd.Flags().StringVar(&format, "format", "", "Deprecated alias for --output")
+	cmd.Flags().BoolVar(&archive, "archive", false, "Export a portable device archive")
+	cmd.Flags().StringVarP(&file, "file", "f", "", "Output file for device archive")
+	cmd.Flags().BoolVar(&includePrivateKey, "include-private-key", false, "Include the API private key in a device archive")
 	return cmd
 }

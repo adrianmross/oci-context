@@ -36,3 +36,44 @@ func TestProfileBlockIncludesPortableKeyPath(t *testing.T) {
 		t.Fatalf("unexpected portable profile=%q key=%q", profile, keyPath)
 	}
 }
+
+func TestMergeOCIProfileReplacesOnlySelectedProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	contents := "[one]\ntenancy=old\nregion=us-phoenix-1\n\n[two]\ntenancy=keep\nregion=us-ashburn-1\n"
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mergeOCIProfile(path, "one", "[one]\ntenancy=new\nregion=us-ashburn-1\n", true); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "tenancy=new") || !strings.Contains(string(got), "[two]\ntenancy=keep") || strings.Contains(string(got), "tenancy=old") {
+		t.Fatalf("unexpected merged config: %s", got)
+	}
+}
+
+func TestDeviceArchiveRoundTrip(t *testing.T) {
+	source := t.TempDir()
+	for name, contents := range map[string]string{"context.json": "{}\n", "oci-profile": "[one]\n", "README.md": "readme\n"} {
+		if err := os.WriteFile(filepath.Join(source, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive := filepath.Join(t.TempDir(), "bundle.tar.gz")
+	if err := archiveDeviceBundle(source, archive); err != nil {
+		t.Fatal(err)
+	}
+	destination, cleanup, err := openDeviceBundle(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	for name := range map[string]bool{"context.json": true, "oci-profile": true, "README.md": true} {
+		if _, err := os.Stat(filepath.Join(destination, name)); err != nil {
+			t.Fatalf("missing %s: %v", name, err)
+		}
+	}
+}

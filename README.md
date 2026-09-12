@@ -498,7 +498,7 @@ To run plain `oci ...` commands without repeatedly passing profile, region, and
 compartment, load managed OCI CLI defaults once per shell:
 
 ```bash
-eval "$(oci-context export -f oci-env)"
+eval "$(oci-context export -o oci-env)"
 ```
 
 This sets:
@@ -511,16 +511,24 @@ defaults automatically.
 
 ## Device bundles
 
-Create a local, non-secret bundle for another device:
+Export the current context as a portable archive. The default filename is
+`<context>.ocix.tar.gz`:
 
 ```bash
-oci-context device export --global --output ./oci-context-device
+oci-context export --archive --global
+# or: oci-context export -o archive -g
 ```
 
-For an explicitly approved private-key transfer, add
-`--include-private-key`. The bundle never includes security-token files; run
-`oci session authenticate` or `oci setup config` on the destination when a key
-is not included.
+Import it on another device with:
+
+```bash
+oci-context import --file lehighcap26.ocix.tar.gz
+```
+
+Bundle imports target the global config automatically. For an explicitly
+approved private-key transfer, add `--include-private-key`. The bundle never
+includes security-token files; run `oci session authenticate` or `oci setup config`
+on the destination when a key is not included.
 
 To promote a generated API key with a still-valid session profile:
 
