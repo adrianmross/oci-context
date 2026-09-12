@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1142,6 +1143,54 @@ func TestAuthShowJSONIncludesDaemonUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"daemon_available": false`) || !strings.Contains(out.String(), `"daemon_error":`) {
 		t.Fatalf("expected daemon availability fields in json, got %s", out.String())
+	}
+}
+
+func TestAuthShowHonorsContextOverride(t *testing.T) {
+	cfg := config.Config{
+		Options: config.Options{SocketPath: t.TempDir() + "/missing.sock"},
+		Contexts: []config.Context{
+			{Name: "current", Profile: "CURRENT", AuthMethod: config.AuthMethodSecurityToken, TenancyOCID: "tenancy", CompartmentOCID: "tenancy", Region: "us-phoenix-1"},
+			{Name: "target", Profile: "TARGET", AuthMethod: config.AuthMethodAPIKey, TenancyOCID: "tenancy", CompartmentOCID: "tenancy", Region: "us-ashburn-1"},
+		},
+		CurrentContext: "current",
+	}
+	cfgPath := filepath.Join(t.TempDir(), "config.yml")
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"auth", "show", "--config", cfgPath, "--context", "target", "--output", "json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth show: %v\n%s", err, out.String())
+	}
+	var got authShowResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Context != "target" || got.Profile != "TARGET" {
+		t.Fatalf("context override ignored: %+v", got)
+	}
+}
+
+func TestAuthFlagChangedFindsPersistentContextOverride(t *testing.T) {
+	root := newRootCmd()
+	auth, _, err := root.Find([]string{"auth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	login, _, err := root.Find([]string{"auth", "login"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.PersistentFlags().Set("context", "target"); err != nil {
+		t.Fatal(err)
+	}
+	if !flagChanged(login, "context") {
+		t.Fatal("expected persistent --context override to be detected by login")
 	}
 }
 

@@ -448,8 +448,15 @@ func mergeAuthLoginTokenService(cfg config.Config, serviceName string, input aut
 }
 
 func flagChanged(cmd *cobra.Command, name string) bool {
-	flag := cmd.Flag(name)
-	return flag != nil && flag.Changed
+	for current := cmd; current != nil; current = current.Parent() {
+		if flag := current.Flags().Lookup(name); flag != nil && flag.Changed {
+			return true
+		}
+		if flag := current.PersistentFlags().Lookup(name); flag != nil && flag.Changed {
+			return true
+		}
+	}
+	return false
 }
 
 func commandNoInteractive(cmd *cobra.Command) bool {
