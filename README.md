@@ -111,6 +111,23 @@ is used only when that is the available interactive flow. Define additional
 services in config when another tool should use a different issuer, client,
 scope, redirect URL, or flow:
 
+For a new OIDC client, discover endpoints from the issuer instead of copying
+them into a handoff file. The client ID, scope, and flow remain application
+settings and are supplied explicitly:
+
+```bash
+oci-context service discover example-service \
+  --issuer https://example.identity.oraclecloud.com \
+  --client-id example-client \
+  --scope https://service.example.com \
+  --flow authorization-code \
+  --set-current
+```
+
+Use `--redirect-url` when the client registers a specific loopback callback.
+For a confidential client, use `--client-secret-env`; never put the secret in
+the command or configuration.
+
 ```yaml
 current_service: obp
 token_services:

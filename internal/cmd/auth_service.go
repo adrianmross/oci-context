@@ -93,6 +93,7 @@ func newAuthServiceCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
 	cmd.AddCommand(newAuthServiceGetCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceImportCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceAddCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceDiscoverCmd(resolvePath))
 	return cmd
 }
 
@@ -117,6 +118,7 @@ func newServiceCmd() *cobra.Command {
 	cmd.AddCommand(newAuthServiceGetCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceAddCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceImportCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceDiscoverCmd(resolvePath))
 	_ = useGlobal
 	return cmd
 }
@@ -185,6 +187,87 @@ func newAuthServiceImportCmd(resolvePath authServiceResolvePathFunc) *cobra.Comm
 
 func newAuthServiceAddCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
 	return newAuthServiceUpsertCmd(resolvePath, "add", "Add token services from stdin or a handoff file", false)
+}
+
+func newAuthServiceDiscoverCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
+	var issuer string
+	var clientID string
+	var scope string
+	var flow string
+	var redirectURL string
+	var clientSecretEnv string
+	var offlineAccess bool
+	var output string
+	var dryRun bool
+	var setCurrent bool
+
+	cmd := &cobra.Command{
+		Use:   "discover <name>",
+		Short: "Discover issuer endpoints and save a token service",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			issuer = strings.TrimSpace(issuer)
+			clientID = strings.TrimSpace(clientID)
+			scope = strings.TrimSpace(scope)
+			if name == "" || issuer == "" || clientID == "" || scope == "" {
+				return fmt.Errorf("name, --issuer, --client-id, and --scope are required")
+			}
+			discovery, err := fetchOAuthDiscovery(issuer)
+			if err != nil {
+				return err
+			}
+			if discovery.TokenEndpoint == "" {
+				return fmt.Errorf("issuer discovery did not provide token endpoint")
+			}
+			service := config.TokenService{
+				Name:                  name,
+				Type:                  config.TokenServiceTypeOAuth,
+				Flow:                  normalizeOAuthFlow(flow),
+				Issuer:                issuer,
+				AuthorizationEndpoint: discovery.AuthorizationEndpoint,
+				TokenEndpoint:         discovery.TokenEndpoint,
+				DeviceEndpoint:        discovery.DeviceAuthorizationEndpoint,
+				ClientID:              clientID,
+				ClientSecretEnv:       strings.TrimSpace(clientSecretEnv),
+				Scope:                 scope,
+				RedirectURL:           strings.TrimSpace(redirectURL),
+				OfflineAccess:         offlineAccess,
+			}
+			path, err := resolvePath(cmd)
+			if err != nil {
+				return err
+			}
+			cfg, err := config.Load(path)
+			if err != nil {
+				return err
+			}
+			result := importTokenServices(&cfg, []config.TokenService{service})
+			if setCurrent {
+				cfg.CurrentService = name
+				result.CurrentService = name
+			}
+			result.ConfigPath = path
+			result.DryRun = dryRun
+			if !dryRun {
+				if err := config.Save(path, cfg); err != nil {
+					return err
+				}
+			}
+			return printAuthServiceImportResult(cmd, result, output)
+		},
+	}
+	cmd.Flags().StringVar(&issuer, "issuer", "", "OAuth issuer URL used for well-known discovery")
+	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client id")
+	cmd.Flags().StringVar(&scope, "scope", "", "OAuth resource scope")
+	cmd.Flags().StringVar(&flow, "flow", "authorization-code", "OAuth flow")
+	cmd.Flags().StringVar(&redirectURL, "redirect-url", "", "OAuth authorization-code loopback redirect URL")
+	cmd.Flags().StringVar(&clientSecretEnv, "client-secret-env", "", "Environment variable holding a confidential-client secret")
+	cmd.Flags().BoolVar(&offlineAccess, "offline-access", false, "Request an OAuth refresh token")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview changes without writing config")
+	cmd.Flags().BoolVar(&setCurrent, "set-current", false, "Set this token service as current")
+	return cmd
 }
 
 func newAuthServiceUpsertCmd(resolvePath authServiceResolvePathFunc, use string, short string, requireFile bool) *cobra.Command {

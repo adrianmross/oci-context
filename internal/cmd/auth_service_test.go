@@ -3,6 +3,9 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +13,49 @@ import (
 
 	"github.com/adrianmross/oci-context/pkg/config"
 )
+
+func TestAuthServiceDiscoverSavesDiscoveredEndpoints(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintf(w, `{"authorization_endpoint":%q,"token_endpoint":%q,"device_authorization_endpoint":%q}`,
+			server.URL+"/authorize", server.URL+"/token", server.URL+"/device")
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"service", "discover", "example-service", "--config", cfgPath, "--issuer", server.URL, "--client-id", "example-client", "--scope", "https://service.example.com", "--flow", "authorization-code", "--set-current"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("discover service: %v\n%s", err, out.String())
+	}
+
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	service, ok := findTokenService(loaded, "example-service")
+	if !ok {
+		t.Fatal("expected discovered service")
+	}
+	if service.AuthorizationEndpoint != server.URL+"/authorize" || service.TokenEndpoint != server.URL+"/token" || service.DeviceEndpoint != server.URL+"/device" {
+		t.Fatalf("unexpected discovered endpoints: %+v", service)
+	}
+	if service.ClientID != "example-client" || service.Scope != "https://service.example.com" || loaded.CurrentService != "example-service" {
+		t.Fatalf("unexpected discovered service: %+v", service)
+	}
+}
 
 func TestAuthServiceImportYAMLFragment(t *testing.T) {
 	tmp := t.TempDir()
