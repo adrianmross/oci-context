@@ -58,6 +58,9 @@ func TestSubjectFromAccessTokenReturnsMetadataOnly(t *testing.T) {
 	if result.Service != "example-service" || result.Subject != "identity-domain-user-id" || !result.NotExpired {
 		t.Fatalf("unexpected subject metadata: %+v", result)
 	}
+	if _, err := subjectFromAccessToken(authTokenCacheEntry{AccessToken: "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"}, "https://other.identity.oraclecloud.com"); err == nil {
+		t.Fatal("expected issuer mismatch to be rejected")
+	}
 }
 
 func TestResolveLoopbackRedirectRejectsCloudGatePlaceholder(t *testing.T) {
