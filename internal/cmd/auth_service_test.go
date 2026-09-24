@@ -232,6 +232,74 @@ func TestServiceVerifyHandoffDetectsRedirectDrift(t *testing.T) {
 	}
 }
 
+func TestServiceSyncPreviewsThenAppliesReviewedHandoff(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatal(err)
+	}
+	handoffPath := filepath.Join(tmp, "handoff.yml")
+	if err := os.WriteFile(handoffPath, []byte(`current_service: example-service
+token_services:
+  - name: example-service
+    type: oauth
+    flow: authorization-code
+    issuer: https://example.identity.oraclecloud.com
+    client_id: example-client
+    scope: https://service.example.com
+    redirect_url: http://127.0.0.1:8180/callback
+    authorization_endpoint: https://example.identity.oraclecloud.com/oauth2/v1/authorize
+    token_endpoint: https://example.identity.oraclecloud.com/oauth2/v1/token
+    offline_access: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := newRootCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(append([]string{"service"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out.String())
+		}
+		return out.String()
+	}
+	if out := run("sync", "--config", cfgPath, "--file", handoffPath, "--set-current"); !strings.Contains(out, "added: example-service") {
+		t.Fatalf("missing preview: %s", out)
+	}
+	before, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findTokenService(before, "example-service"); ok {
+		t.Fatal("preview wrote config")
+	}
+	run("sync", "--config", cfgPath, "--file", handoffPath, "--set-current", "--apply")
+	after, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.CurrentService != "example-service" {
+		t.Fatalf("wrong current service: %q", after.CurrentService)
+	}
+	run("verify", "--config", cfgPath, "--file", handoffPath)
+	inlinePath := filepath.Join(tmp, "inline.yml")
+	data, err := os.ReadFile(handoffPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inlinePath, append(data, []byte("    client_secret: forbidden\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"service", "sync", "--config", cfgPath, "--file", inlinePath, "--apply"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "inline credentials") {
+		t.Fatalf("expected inline credential rejection, got %v", err)
+	}
+}
+
 func TestServiceAddFromStdinSetsCurrentService(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")

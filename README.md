@@ -186,13 +186,23 @@ oci-context tool setup ochain --include-token
 either handoff shape directly:
 
 ```bash
-oci-context service add \
+oci-context service sync \
   --file ./idm-artifacts/oci-context-token-services.yml \
   --set-current
+# Review the added/updated service names and current service, then apply:
+oci-context service sync \
+  --file ./idm-artifacts/oci-context-token-services.yml \
+  --set-current --apply
+oci-context service verify \
+  --file ./idm-artifacts/oci-context-token-services.yml
 
 oci-context service list
 oci-context service get
 ```
+
+`service sync` previews local config changes by default. `--apply` writes
+them and checks the saved OAuth contract against the handoff. It never creates
+or changes an Identity Domain app. Use `service verify` later to detect drift.
 
 `service get [name]` defaults to `current_service` and emits JSON by default.
 The document contains redacted OAuth metadata plus a structured `credential`
