@@ -39,6 +39,27 @@ func TestAuthCapabilityForMethod(t *testing.T) {
 	}
 }
 
+func TestSubjectFromAccessTokenReturnsMetadataOnly(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"iss": "https://idcs-example.identity.oraclecloud.com",
+		"sub": "identity-domain-user-id",
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := subjectFromAccessToken(authTokenCacheEntry{
+		Service:     "example-service",
+		AccessToken: "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature",
+	}, "https://idcs-example.identity.oraclecloud.com")
+	if err != nil {
+		t.Fatalf("subject from access token: %v", err)
+	}
+	if result.Service != "example-service" || result.Subject != "identity-domain-user-id" || !result.NotExpired {
+		t.Fatalf("unexpected subject metadata: %+v", result)
+	}
+}
+
 func TestResolveLoopbackRedirectRejectsCloudGatePlaceholder(t *testing.T) {
 	_, _, _, err := resolveLoopbackRedirect("https://%hostid%/cloudgate/v1/oauth2/callback")
 	if err == nil {

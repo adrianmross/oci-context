@@ -237,6 +237,16 @@ oci-idm get defaults --service obp |
 oci-context auth token --service obp --no-login --format raw
 ```
 
+For a metadata-only view of the cached token subject, require the target
+issuer explicitly. The command emits only service, context, issuer, subject,
+and expiry metadata; it never prints the access token or other claims:
+
+```bash
+oci-context auth subject \
+  --service example-service \
+  --require-issuer https://idcs-example.identity.oraclecloud.com
+```
+
 For the common Red Wiz OABCS target, select the OCI context for `oabcs1` in the
 default domain and configure the chaincode deploy environment for
 `pmdemo/adrian/did` on channel `testnet`. The token command reads
