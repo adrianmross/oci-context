@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/adrianmross/oci-context/pkg/config"
 	"github.com/spf13/cobra"
 )
 
@@ -56,6 +57,40 @@ func newAuthSubjectCmd(resolvePath authResolvePathFunc, loadTarget authLoadTarge
 	}
 	cmd.Flags().StringVar(&service, "service", "", "token service name (default current_service else obp)")
 	cmd.Flags().StringVar(&expectedIssuer, "require-issuer", "", "expected JWT issuer; defaults to the token service issuer")
+	return cmd
+}
+
+func newWhoAmICmd() *cobra.Command {
+	var cfgPath string
+	var useGlobal bool
+	var targetContext string
+	resolvePath := func(_ *cobra.Command) (string, error) {
+		return resolveConfigPath(cfgPath, useGlobal)
+	}
+	loadTarget := func(path string) (config.Config, config.Context, error) {
+		cfg, err := config.Load(path)
+		if err != nil {
+			return config.Config{}, config.Context{}, err
+		}
+		name := strings.TrimSpace(targetContext)
+		if name == "" {
+			name = cfg.CurrentContext
+		}
+		if name == "" {
+			return config.Config{}, config.Context{}, fmt.Errorf("no current context set")
+		}
+		ctx, err := cfg.GetContext(name)
+		if err != nil {
+			return config.Config{}, config.Context{}, err
+		}
+		return cfg, ctx, nil
+	}
+	cmd := newAuthSubjectCmd(resolvePath, loadTarget)
+	cmd.Use = "whoami"
+	cmd.Short = "Show the current Identity Domain token subject"
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
+	cmd.Flags().BoolVarP(&useGlobal, "global", "g", false, "Use global config (~/.oci-context/config.yml)")
+	cmd.Flags().StringVar(&targetContext, "context", "", "context name (default current context)")
 	return cmd
 }
 

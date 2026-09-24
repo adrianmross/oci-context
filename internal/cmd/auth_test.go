@@ -63,6 +63,13 @@ func TestSubjectFromAccessTokenReturnsMetadataOnly(t *testing.T) {
 	}
 }
 
+func TestWhoAmIUsesSubjectFlags(t *testing.T) {
+	cmd := newWhoAmICmd()
+	if cmd.Use != "whoami" || cmd.Flags().Lookup("service") == nil || cmd.Flags().Lookup("require-issuer") == nil || cmd.Flags().Lookup("context") == nil {
+		t.Fatalf("whoami must expose the subject command flags")
+	}
+}
+
 func TestResolveLoopbackRedirectRejectsCloudGatePlaceholder(t *testing.T) {
 	_, _, _, err := resolveLoopbackRedirect("https://%hostid%/cloudgate/v1/oauth2/callback")
 	if err == nil {
