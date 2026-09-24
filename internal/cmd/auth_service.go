@@ -108,6 +108,7 @@ func newAuthServiceCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
 	cmd.AddCommand(newAuthServiceAddCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceDiscoverCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceVerifyCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceSyncCmd(resolvePath))
 	return cmd
 }
 
@@ -134,6 +135,7 @@ func newServiceCmd() *cobra.Command {
 	cmd.AddCommand(newAuthServiceImportCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceDiscoverCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceVerifyCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceSyncCmd(resolvePath))
 	_ = useGlobal
 	return cmd
 }
@@ -197,11 +199,15 @@ func newAuthServiceListCmd(resolvePath authServiceResolvePathFunc) *cobra.Comman
 }
 
 func newAuthServiceImportCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
-	return newAuthServiceUpsertCmd(resolvePath, "import", "Import token services from an oci-idm handoff file", true)
+	return newAuthServiceUpsertCmd(resolvePath, "import", "Import token services from an oci-idm handoff file", true, false)
 }
 
 func newAuthServiceAddCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
-	return newAuthServiceUpsertCmd(resolvePath, "add", "Add token services from stdin or a handoff file", false)
+	return newAuthServiceUpsertCmd(resolvePath, "add", "Add token services from stdin or a handoff file", false, false)
+}
+
+func newAuthServiceSyncCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
+	return newAuthServiceUpsertCmd(resolvePath, "sync", "Preview or apply a reviewed oci-idm handoff", true, true)
 }
 
 func newAuthServiceDiscoverCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
@@ -341,22 +347,33 @@ func newAuthServiceVerifyCmd(resolvePath authServiceResolvePathFunc) *cobra.Comm
 	return cmd
 }
 
-func newAuthServiceUpsertCmd(resolvePath authServiceResolvePathFunc, use string, short string, requireFile bool) *cobra.Command {
+func newAuthServiceUpsertCmd(resolvePath authServiceResolvePathFunc, use string, short string, requireFile bool, previewByDefault bool) *cobra.Command {
 	var file string
 	var output string
 	var dryRun bool
+	var apply bool
 	var setCurrent bool
 	var currentService string
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if previewByDefault {
+				dryRun = !apply
+			}
 			if requireFile && strings.TrimSpace(file) == "" {
 				return fmt.Errorf("--file is required")
 			}
 			payload, err := readTokenServicesImport(file, cmd.InOrStdin())
 			if err != nil {
 				return err
+			}
+			if previewByDefault {
+				for _, service := range payload.TokenServices {
+					if service.ClientSecret != "" || service.Assertion != "" || service.ClientAssertion != "" || service.SubjectToken != "" {
+						return fmt.Errorf("handoff for %q contains inline credentials; use environment references instead", service.Name)
+					}
+				}
 			}
 			path, err := resolvePath(cmd)
 			if err != nil {
@@ -384,13 +401,29 @@ func newAuthServiceUpsertCmd(resolvePath authServiceResolvePathFunc, use string,
 				if err := config.Save(path, cfg); err != nil {
 					return err
 				}
+				if previewByDefault {
+					saved, err := config.Load(path)
+					if err != nil {
+						return err
+					}
+					for _, expected := range payload.TokenServices {
+						index := tokenServiceIndex(saved.TokenServices, expected.Name)
+						if index == -1 || len(verifyTokenService(expected.Name, file, expected, saved.TokenServices[index]).Mismatches) > 0 {
+							return fmt.Errorf("token service %q differs from its handoff after import", expected.Name)
+						}
+					}
+				}
 			}
 			return printAuthServiceImportResult(cmd, result, output)
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "Path to oci-idm oci-context handoff YAML or JSON, or - for stdin")
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview changes without writing config")
+	if previewByDefault {
+		cmd.Flags().BoolVar(&apply, "apply", false, "Write the reviewed local changes and verify them")
+	} else {
+		cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview changes without writing config")
+	}
 	cmd.Flags().BoolVar(&setCurrent, "set-current", false, "Set current_service to the imported target")
 	cmd.Flags().StringVar(&currentService, "service", "", "Imported token service to mark current with --set-current")
 	if requireFile {
