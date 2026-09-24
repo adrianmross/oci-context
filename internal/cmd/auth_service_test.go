@@ -174,6 +174,64 @@ func TestAuthServiceImportOCIIDMJSONHandoffDryRun(t *testing.T) {
 	}
 }
 
+func TestServiceVerifyHandoffDetectsRedirectDrift(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	cfg := config.DefaultConfig(tmp)
+	cfg.CurrentService = "example-service"
+	cfg.TokenServices = append(cfg.TokenServices, config.TokenService{
+		Name: "example-service", Type: "oauth", Flow: "authorization-code",
+		Issuer: "https://example.identity.oraclecloud.com", ClientID: "example-client",
+		Scope: "https://service.example.com", RedirectURL: "http://127.0.0.1:8180/callback",
+		AuthorizationEndpoint: "https://example.identity.oraclecloud.com/oauth2/v1/authorize",
+		TokenEndpoint:         "https://example.identity.oraclecloud.com/oauth2/v1/token", OfflineAccess: true,
+	})
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	handoffPath := filepath.Join(tmp, "oci-context.handoff.json")
+	if err := os.WriteFile(handoffPath, []byte(`{
+  "currentService": "example-service",
+  "tokenServices": [{
+    "name": "example-service", "type": "oauth", "flow": "authorization-code",
+    "issuer": "https://example.identity.oraclecloud.com", "clientId": "example-client",
+    "scope": "https://service.example.com", "redirectUrl": "http://127.0.0.1:8180/callback",
+    "authorizationEndpoint": "https://example.identity.oraclecloud.com/oauth2/v1/authorize",
+    "tokenEndpoint": "https://example.identity.oraclecloud.com/oauth2/v1/token", "offlineAccess": true
+  }]
+}`), 0o600); err != nil {
+		t.Fatalf("write handoff: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"service", "verify", "--config", cfgPath, "--file", handoffPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("verify matching handoff: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "verified: example-service") {
+		t.Fatalf("unexpected verify output: %s", out.String())
+	}
+
+	cfg.TokenServices[len(cfg.TokenServices)-1].RedirectURL = "http://127.0.0.1:8282/callback"
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save drifted config: %v", err)
+	}
+	cmd = newRootCmd()
+	out.Reset()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"service", "verify", "--config", cfgPath, "--file", handoffPath})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected redirect drift to fail verification")
+	}
+	if !strings.Contains(out.String(), "mismatch: redirect_url") {
+		t.Fatalf("unexpected drift output: %s", out.String())
+	}
+}
+
 func TestServiceAddFromStdinSetsCurrentService(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")

@@ -84,6 +84,19 @@ type authServiceImportResult struct {
 	CurrentService string   `json:"current_service,omitempty" yaml:"current_service,omitempty"`
 }
 
+type authServiceVerifyResult struct {
+	Service     string                      `json:"service" yaml:"service"`
+	HandoffFile string                      `json:"handoff_file" yaml:"handoff_file"`
+	Matches     []string                    `json:"matches" yaml:"matches"`
+	Mismatches  []authServiceVerifyMismatch `json:"mismatches,omitempty" yaml:"mismatches,omitempty"`
+}
+
+type authServiceVerifyMismatch struct {
+	Field    string `json:"field" yaml:"field"`
+	Expected string `json:"expected" yaml:"expected"`
+	Actual   string `json:"actual" yaml:"actual"`
+}
+
 func newAuthServiceCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "service",
@@ -94,6 +107,7 @@ func newAuthServiceCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
 	cmd.AddCommand(newAuthServiceImportCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceAddCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceDiscoverCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceVerifyCmd(resolvePath))
 	return cmd
 }
 
@@ -119,6 +133,7 @@ func newServiceCmd() *cobra.Command {
 	cmd.AddCommand(newAuthServiceAddCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceImportCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceDiscoverCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceVerifyCmd(resolvePath))
 	_ = useGlobal
 	return cmd
 }
@@ -267,6 +282,62 @@ func newAuthServiceDiscoverCmd(resolvePath authServiceResolvePathFunc) *cobra.Co
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview changes without writing config")
 	cmd.Flags().BoolVar(&setCurrent, "set-current", false, "Set this token service as current")
+	return cmd
+}
+
+func newAuthServiceVerifyCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
+	var file string
+	var output string
+	cmd := &cobra.Command{
+		Use:   "verify [name]",
+		Short: "Verify a configured token service against an oci-idm handoff",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(file) == "" {
+				return fmt.Errorf("--file is required")
+			}
+			payload, err := readTokenServicesImport(file, cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			path, err := resolvePath(cmd)
+			if err != nil {
+				return err
+			}
+			cfg, err := config.Load(path)
+			if err != nil {
+				return err
+			}
+			name := strings.TrimSpace(cfg.CurrentService)
+			if len(args) == 1 {
+				name = strings.TrimSpace(args[0])
+			}
+			if name == "" {
+				name, err = selectCurrentServiceForImport(payload, "")
+				if err != nil {
+					return err
+				}
+			}
+			expectedIndex := tokenServiceIndex(payload.TokenServices, name)
+			if expectedIndex == -1 {
+				return fmt.Errorf("token service %q not found in handoff", name)
+			}
+			actualIndex := tokenServiceIndex(cfg.TokenServices, name)
+			if actualIndex == -1 {
+				return fmt.Errorf("token service %q is not configured", name)
+			}
+			result := verifyTokenService(name, file, payload.TokenServices[expectedIndex], cfg.TokenServices[actualIndex])
+			if err := printAuthServiceVerifyResult(cmd, result, output); err != nil {
+				return err
+			}
+			if len(result.Mismatches) > 0 {
+				return fmt.Errorf("token service %q differs from its handoff", name)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&file, "file", "f", "", "Path to an oci-idm oci-context handoff YAML or JSON")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
 	return cmd
 }
 
@@ -464,6 +535,40 @@ func tokenServicesEqual(a, b config.TokenService) bool {
 	return string(left) == string(right)
 }
 
+func verifyTokenService(name string, handoffFile string, expected config.TokenService, actual config.TokenService) authServiceVerifyResult {
+	result := authServiceVerifyResult{Service: name, HandoffFile: handoffFile}
+	for _, field := range []struct {
+		name     string
+		expected string
+		actual   string
+	}{
+		{"type", expected.Type, actual.Type},
+		{"flow", expected.Flow, actual.Flow},
+		{"issuer", expected.Issuer, actual.Issuer},
+		{"client_id", expected.ClientID, actual.ClientID},
+		{"scope", expected.Scope, actual.Scope},
+		{"redirect_url", expected.RedirectURL, actual.RedirectURL},
+		{"authorization_endpoint", expected.AuthorizationEndpoint, actual.AuthorizationEndpoint},
+		{"token_endpoint", expected.TokenEndpoint, actual.TokenEndpoint},
+	} {
+		if strings.TrimSpace(field.expected) == strings.TrimSpace(field.actual) {
+			result.Matches = append(result.Matches, field.name)
+			continue
+		}
+		result.Mismatches = append(result.Mismatches, authServiceVerifyMismatch{
+			Field: field.name, Expected: field.expected, Actual: field.actual,
+		})
+	}
+	if expected.OfflineAccess == actual.OfflineAccess {
+		result.Matches = append(result.Matches, "offline_access")
+	} else {
+		result.Mismatches = append(result.Mismatches, authServiceVerifyMismatch{
+			Field: "offline_access", Expected: fmt.Sprint(expected.OfflineAccess), Actual: fmt.Sprint(actual.OfflineAccess),
+		})
+	}
+	return result
+}
+
 func viewTokenService(service config.TokenService) authServiceView {
 	view := authServiceView{
 		Name:                          service.Name,
@@ -540,6 +645,32 @@ func printAuthService(cmd *cobra.Command, service authServiceView, output string
 		enc := yaml.NewEncoder(cmd.OutOrStdout())
 		defer enc.Close()
 		return enc.Encode(service)
+	default:
+		return fmt.Errorf("unsupported output format: %s", output)
+	}
+}
+
+func printAuthServiceVerifyResult(cmd *cobra.Command, result authServiceVerifyResult, output string) error {
+	switch strings.ToLower(strings.TrimSpace(output)) {
+	case "", "text":
+		if len(result.Mismatches) == 0 {
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "verified: %s matches %s\n", result.Service, result.HandoffFile)
+			return err
+		}
+		for _, mismatch := range result.Mismatches {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "mismatch: %s expected=%q actual=%q\n", mismatch.Field, mismatch.Expected, mismatch.Actual); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "json":
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	case "yaml", "yml":
+		enc := yaml.NewEncoder(cmd.OutOrStdout())
+		defer enc.Close()
+		return enc.Encode(result)
 	default:
 		return fmt.Errorf("unsupported output format: %s", output)
 	}
