@@ -300,6 +300,56 @@ token_services:
 	}
 }
 
+func TestHandoffAcceptPreviewsThenAppliesAndPrintsSafeNextSteps(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatal(err)
+	}
+	handoffPath := filepath.Join(tmp, "handoff.yml")
+	if err := os.WriteFile(handoffPath, []byte(`current_service: example-service
+token_services:
+  - name: example-service
+    type: oauth
+    flow: authorization-code
+    issuer: https://example.identity.oraclecloud.com
+    client_id: example-client
+    scope: https://service.example.com
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := newRootCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(append([]string{"handoff", "accept", "--config", cfgPath, "--file", handoffPath, "--set-current"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out.String())
+		}
+		return out.String()
+	}
+	if out := run(); !strings.Contains(out, "Would import") || !strings.Contains(out, "re-run with --apply") {
+		t.Fatalf("unexpected preview:\n%s", out)
+	}
+	if _, ok := findTokenService(mustLoadConfig(t, cfgPath), "example-service"); ok {
+		t.Fatal("preview wrote config")
+	}
+	if out := run("--apply"); !strings.Contains(out, "auth token --service \"example-service\"") || !strings.Contains(out, "whoami --service \"example-service\"") {
+		t.Fatalf("missing next steps:\n%s", out)
+	}
+}
+
+func mustLoadConfig(t *testing.T, path string) config.Config {
+	t.Helper()
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
 func TestServiceAddFromStdinSetsCurrentService(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")
