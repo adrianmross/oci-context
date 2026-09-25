@@ -82,6 +82,7 @@ type authServiceImportResult struct {
 	Updated        []string `json:"updated" yaml:"updated"`
 	Unchanged      []string `json:"unchanged" yaml:"unchanged"`
 	CurrentService string   `json:"current_service,omitempty" yaml:"current_service,omitempty"`
+	Next           []string `json:"next,omitempty" yaml:"next,omitempty"`
 }
 
 type authServiceVerifyResult struct {
@@ -137,6 +138,26 @@ func newServiceCmd() *cobra.Command {
 	cmd.AddCommand(newAuthServiceVerifyCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceSyncCmd(resolvePath))
 	_ = useGlobal
+	return cmd
+}
+
+func newHandoffCmd() *cobra.Command {
+	resolvePath := func(cmd *cobra.Command) (string, error) {
+		cfgPath, err := cmd.Flags().GetString("config")
+		if err != nil {
+			return "", err
+		}
+		useGlobal, err := cmd.Flags().GetBool("global")
+		if err != nil {
+			return "", err
+		}
+		return resolveConfigPath(cfgPath, useGlobal)
+	}
+	cmd := &cobra.Command{
+		Use:   "handoff",
+		Short: "Accept reviewed configuration handoffs",
+	}
+	cmd.AddCommand(newAuthServiceUpsertCmd(resolvePath, "accept", "Preview or apply a reviewed oci-idm token-service handoff", true, true))
 	return cmd
 }
 
@@ -291,6 +312,19 @@ func newAuthServiceDiscoverCmd(resolvePath authServiceResolvePathFunc) *cobra.Co
 	return cmd
 }
 
+func nextAuthServiceSteps(result authServiceImportResult) []string {
+	if result.DryRun {
+		return []string{"Review this preview, then re-run with --apply to write and verify it."}
+	}
+	if result.CurrentService == "" {
+		return nil
+	}
+	return []string{
+		fmt.Sprintf("oci-context auth token --service %q --format raw >/dev/null", result.CurrentService),
+		fmt.Sprintf("oci-context whoami --service %q", result.CurrentService),
+	}
+}
+
 func newAuthServiceVerifyCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
 	var file string
 	var output string
@@ -413,6 +447,9 @@ func newAuthServiceUpsertCmd(resolvePath authServiceResolvePathFunc, use string,
 						}
 					}
 				}
+			}
+			if previewByDefault {
+				result.Next = nextAuthServiceSteps(result)
 			}
 			return printAuthServiceImportResult(cmd, result, output)
 		},
@@ -728,6 +765,9 @@ func printAuthServiceImportResult(cmd *cobra.Command, result authServiceImportRe
 		}
 		if result.CurrentService != "" {
 			fmt.Fprintf(cmd.OutOrStdout(), "current_service: %s\n", result.CurrentService)
+		}
+		for _, step := range result.Next {
+			fmt.Fprintf(cmd.OutOrStdout(), "next: %s\n", step)
 		}
 		return nil
 	case "json":
