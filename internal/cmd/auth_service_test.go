@@ -174,6 +174,24 @@ func TestAuthServiceImportOCIIDMJSONHandoffDryRun(t *testing.T) {
 	}
 }
 
+func TestServiceImportRejectsUnsupportedExportContract(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetIn(strings.NewReader(`{"apiVersion":"example.invalid/v2","kind":"OCIContextTokenServiceExport","tokenServices":[{"name":"example","type":"oauth","flow":"authorization-code","issuer":"https://example.identity.oraclecloud.com","clientId":"example-client","scope":"https://service.example.com"}]}`))
+	cmd.SetArgs([]string{"service", "import", "--config", cfgPath})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unsupported token-service export apiVersion") {
+		t.Fatalf("expected contract error, got %v\n%s", err, out.String())
+	}
+}
+
 func TestServiceVerifyHandoffDetectsRedirectDrift(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")

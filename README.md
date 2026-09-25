@@ -196,11 +196,14 @@ oci-idm export --shape ocix --plan idm-plan.json |
 ```
 
 `export --shape ocix` and `service import` use the same
-secret-free JSON contract. `service import` previews local config changes by
-default. `--apply` writes them and checks the saved OAuth contract against the
-export. It never creates or changes an Identity Domain app. `handoff accept`
-and `service sync` remain supported for existing scripts; use `service verify`
-with a saved export later to detect drift.
+secret-free JSON contract: `apiVersion: oci-idm.oracle.com/v1` and
+`kind: OCIContextTokenServiceExport`. Legacy exports without those fields stay
+supported; an explicit incompatible version is rejected. `service import`
+previews local config changes by default. `--apply` writes them and checks the
+saved OAuth contract against the export. It never creates or changes an
+Identity Domain app. `handoff accept` and `service sync` remain supported for
+existing scripts; use `service verify` with a saved export later to detect
+drift.
 
 `service get [name]` defaults to `current_service` and emits JSON by default.
 The document contains redacted OAuth metadata plus a structured `credential`
