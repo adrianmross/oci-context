@@ -16,11 +16,17 @@ func newAddCmd() *cobra.Command {
 	var ctx config.Context
 
 	cmd := &cobra.Command{
-		Use:     "create [name]",
+		Use:     "create [context] [name]",
 		Aliases: []string{"add"},
 		Short:   "Create or update a context from an OCI profile",
-		Args:    cobra.MaximumNArgs(1),
+		Args:    cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && args[0] == "context" {
+				args = args[1:]
+			}
+			if len(args) > 1 {
+				return fmt.Errorf("create accepts context followed by one context name")
+			}
 			useGlobal, err := cmd.Flags().GetBool("global")
 			if err != nil {
 				return err

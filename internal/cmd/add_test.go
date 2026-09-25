@@ -27,7 +27,7 @@ func TestCreateInheritsProfileAndUsesOverrides(t *testing.T) {
 	cmd.SetOut(out)
 	cmd.SetErr(out)
 	cmd.SetArgs([]string{
-		"create", "new-region",
+		"create", "context", "new-region",
 		"--config", cfgPath,
 		"--region", "us-ashburn-1",
 		"--compartment", "ocid1.compartment.oc1..compartment",
@@ -49,5 +49,35 @@ func TestCreateInheritsProfileAndUsesOverrides(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Created/updated context new-region") {
 		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
+func TestEditAndDeleteContextForms(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.Config{Contexts: []config.Context{{Name: "dev", Profile: "DEFAULT", Region: "us-phoenix-1"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"edit", "context", "dev", "--notes", "updated", "--config", cfgPath},
+		{"delete", "context", "dev", "--config", cfgPath},
+	} {
+		cmd := newRootCmd()
+		out := &bytes.Buffer{}
+		cmd.SetOut(out)
+		cmd.SetErr(out)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Contexts) != 0 {
+		t.Fatalf("expected context deletion, got %+v", got.Contexts)
 	}
 }

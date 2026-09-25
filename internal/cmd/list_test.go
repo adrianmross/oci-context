@@ -181,3 +181,34 @@ func TestListOutputs(t *testing.T) {
 		})
 	}
 }
+
+func TestGetContextAliases(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := tmp + "/config.yml"
+	if err := config.Save(cfgPath, config.Config{
+		Contexts:       []config.Context{{Name: "dev", Profile: "DEFAULT", Region: "us-phoenix-1"}},
+		CurrentContext: "dev",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"get", "contexts", "--config", cfgPath}, want: "* dev"},
+		{args: []string{"get", "context", "--config", cfgPath}, want: "dev\n"},
+	} {
+		cmd := newRootCmd()
+		out := &bytes.Buffer{}
+		cmd.SetOut(out)
+		cmd.SetErr(out)
+		cmd.SetArgs(test.args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v", test.args, err)
+		}
+		if !strings.Contains(out.String(), test.want) {
+			t.Fatalf("%v: expected %q in %q", test.args, test.want, out.String())
+		}
+	}
+}
