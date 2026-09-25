@@ -174,6 +174,24 @@ func TestAuthServiceImportOCIIDMJSONHandoffDryRun(t *testing.T) {
 	}
 }
 
+func TestServiceImportRejectsUnsupportedExportContract(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetIn(strings.NewReader(`{"apiVersion":"example.invalid/v2","kind":"OCIContextTokenServiceExport","tokenServices":[{"name":"example","type":"oauth","flow":"authorization-code","issuer":"https://example.identity.oraclecloud.com","clientId":"example-client","scope":"https://service.example.com"}]}`))
+	cmd.SetArgs([]string{"service", "import", "--config", cfgPath})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unsupported token-service export apiVersion") {
+		t.Fatalf("expected contract error, got %v\n%s", err, out.String())
+	}
+}
+
 func TestServiceVerifyHandoffDetectsRedirectDrift(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")
@@ -338,6 +356,50 @@ token_services:
 	}
 	if out := run("--apply"); !strings.Contains(out, "auth token --service \"example-service\"") || !strings.Contains(out, "whoami --service \"example-service\"") {
 		t.Fatalf("missing next steps:\n%s", out)
+	}
+}
+
+func TestServiceImportPreviewsThenAppliesFromStdin(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatal(err)
+	}
+	handoff := `{
+  "schemaVersion": "oci-idm.handoff.oci-context.v1",
+  "currentService": "example-service",
+  "tokenServices": [{
+    "name": "example-service",
+    "type": "oauth",
+    "flow": "authorization-code",
+    "issuer": "https://example.identity.oraclecloud.com",
+    "clientId": "example-client",
+    "scope": "https://service.example.com"
+  }]
+}`
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := newRootCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetIn(strings.NewReader(handoff))
+		cmd.SetArgs(append([]string{"service", "import", "--config", cfgPath, "--set-current"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out.String())
+		}
+		return out.String()
+	}
+	if out := run(); !strings.Contains(out, "Would import") || !strings.Contains(out, "re-run with --apply") {
+		t.Fatalf("unexpected preview:\n%s", out)
+	}
+	if _, ok := findTokenService(mustLoadConfig(t, cfgPath), "example-service"); ok {
+		t.Fatal("preview wrote config")
+	}
+	run("--apply")
+	cfg := mustLoadConfig(t, cfgPath)
+	if cfg.CurrentService != "example-service" {
+		t.Fatalf("current service = %q", cfg.CurrentService)
 	}
 }
 

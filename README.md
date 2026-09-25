@@ -181,30 +181,29 @@ for one-shot consumers that need an `OCHAIN_TOKEN` value in the payload:
 oci-context tool setup ochain --include-token
 ```
 
-`oci-idm` materializes `oci-context-token-services.yml` and
-`oci-context.handoff.json` files for planned Identity Domains apps. Import
-either handoff shape directly:
+For a saved Identity Domains plan, preview its generated token services without
+writing an intermediate handoff file:
 
 ```bash
-oci-context handoff accept \
-  --file ./idm-artifacts/oci-context-token-services.yml \
+set -o pipefail
+oci-idm export --shape ocix --plan idm-plan.json |
+  oci-context service import \
   --set-current
-# Review the added/updated service names and current service, then apply:
-oci-context handoff accept \
-  --file ./idm-artifacts/oci-context-token-services.yml \
+# Review the added/updated service names and current service, then repeat with:
+oci-idm export --shape ocix --plan idm-plan.json |
+  oci-context service import \
   --set-current --apply
-oci-context service verify \
-  --file ./idm-artifacts/oci-context-token-services.yml
-
-oci-context service list
-oci-context service get
 ```
 
-`handoff accept` previews local config changes by default. `--apply` writes
-them, checks the saved OAuth contract against the handoff, and prints the safe
-token and subject checks for the selected service. It never creates or changes
-an Identity Domain app. `service sync` remains supported for existing scripts;
-use `service verify` later to detect drift.
+`export --shape ocix` and `service import` use the same
+secret-free JSON contract: `apiVersion: oci-idm.oracle.com/v1` and
+`kind: OCIContextTokenServiceExport`. Legacy exports without those fields stay
+supported; an explicit incompatible version is rejected. `service import`
+previews local config changes by default. `--apply` writes them and checks the
+saved OAuth contract against the export. It never creates or changes an
+Identity Domain app. `handoff accept` and `service sync` remain supported for
+existing scripts; use `service verify` with a saved export later to detect
+drift.
 
 `service get [name]` defaults to `current_service` and emits JSON by default.
 The document contains redacted OAuth metadata plus a structured `credential`

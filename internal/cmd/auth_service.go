@@ -15,6 +15,8 @@ import (
 type authServiceResolvePathFunc func(*cobra.Command) (string, error)
 
 type tokenServiceImportDocument struct {
+	APIVersion          string                    `yaml:"apiVersion" json:"apiVersion"`
+	Kind                string                    `yaml:"kind" json:"kind"`
 	CurrentService      string                    `yaml:"current_service" json:"current_service"`
 	CamelCurrentService string                    `yaml:"currentService" json:"currentService"`
 	TokenServices       []config.TokenService     `yaml:"token_services" json:"token_services"`
@@ -133,7 +135,7 @@ func newServiceCmd() *cobra.Command {
 	cmd.AddCommand(newAuthServiceListCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceGetCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceAddCmd(resolvePath))
-	cmd.AddCommand(newAuthServiceImportCmd(resolvePath))
+	cmd.AddCommand(newAuthServicePreviewImportCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceDiscoverCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceVerifyCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceSyncCmd(resolvePath))
@@ -221,6 +223,10 @@ func newAuthServiceListCmd(resolvePath authServiceResolvePathFunc) *cobra.Comman
 
 func newAuthServiceImportCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
 	return newAuthServiceUpsertCmd(resolvePath, "import", "Import token services from an oci-idm handoff file", true, false)
+}
+
+func newAuthServicePreviewImportCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
+	return newAuthServiceUpsertCmd(resolvePath, "import", "Preview or apply token services from an oci-idm export", false, true)
 }
 
 func newAuthServiceAddCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
@@ -477,6 +483,12 @@ func readTokenServicesImport(path string, stdin io.Reader) (tokenServiceImportPa
 	var doc tokenServiceImportDocument
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return tokenServiceImportPayload{}, err
+	}
+	if doc.APIVersion != "" && doc.APIVersion != "oci-idm.oracle.com/v1" {
+		return tokenServiceImportPayload{}, fmt.Errorf("unsupported token-service export apiVersion %q", doc.APIVersion)
+	}
+	if doc.Kind != "" && doc.Kind != "OCIContextTokenServiceExport" {
+		return tokenServiceImportPayload{}, fmt.Errorf("unsupported token-service export kind %q", doc.Kind)
 	}
 	services := make([]config.TokenService, 0, len(doc.TokenServices)+len(doc.CamelTokenServices))
 	services = append(services, doc.TokenServices...)
