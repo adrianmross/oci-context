@@ -23,8 +23,9 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 
 ## Status and Diagnostics
 - Runtime status:
-  - `oci-context daemon auth-status [--context <name>]`
-  - `oci-context daemon doctor [--context <name>]`
+  - `oci-context daemon status [--context <name>]`
+  - `oci-context daemon describe [--context <name>]`
+  - `auth-status` and `doctor` remain compatibility aliases.
   - `oci-context auth show --context <name>`
 - Daemon/auth JSON status exposes derived readiness fields:
   - `ready`
@@ -78,8 +79,8 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 - When installing multiple macOS integrations, write Hammerspoon last because it
   owns the actionable wake script that sleepwatcher executes.
 - macOS: quick restart + nudge when returning to machine:
-  - `oci-context daemon up`
-  - aliases: `oci-context daemon recover`, `oci-context daemon fix`
+  - `oci-context daemon restart`
+  - aliases: `oci-context daemon up`, `oci-context daemon recover`, `oci-context daemon fix`
 - macOS: generate launchd plist with:
   - `oci-context daemon install launchd ...` (or legacy `daemon launchd generate`)
 - macOS: optional actionable wake notifications with Hammerspoon:

@@ -12,10 +12,16 @@ func newDeleteCmd() *cobra.Command {
 	var useGlobal bool
 
 	cmd := &cobra.Command{
-		Use:   "delete <name>",
+		Use:   "delete [context] <name>",
 		Short: "Delete a context",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 2 {
+				if args[0] != "context" {
+					return fmt.Errorf("delete requires context before the context name")
+				}
+				args = args[1:]
+			}
 			useGlobal, err := cmd.Flags().GetBool("global")
 			if err != nil {
 				return err

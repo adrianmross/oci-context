@@ -13,10 +13,17 @@ func newSetCmd() *cobra.Command {
 	var region, profile, authMethod, tenancy, compartment, user, notes string
 
 	cmd := &cobra.Command{
-		Use:   "set <name>",
-		Short: "Update fields of a context",
-		Args:  cobra.ExactArgs(1),
+		Use:     "edit [context] <name>",
+		Aliases: []string{"set"},
+		Short:   "Update fields of a context",
+		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 2 {
+				if args[0] != "context" {
+					return fmt.Errorf("edit requires context before the context name")
+				}
+				args = args[1:]
+			}
 			useGlobal, err := cmd.Flags().GetBool("global")
 			if err != nil {
 				return err

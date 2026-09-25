@@ -24,9 +24,14 @@ func newStatusCmd() *cobra.Command {
 	var noLookup bool
 
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show current context details (friendly names)",
+		Use:     "describe [context]",
+		Aliases: []string{"status"},
+		Short:   "Show current context details (friendly names)",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 && args[0] != "context" && args[0] != "status" && args[0] != "describe" {
+				return fmt.Errorf("describe supports the current context only")
+			}
 			useGlobal, err := cmd.Flags().GetBool("global")
 			if err != nil {
 				return err
