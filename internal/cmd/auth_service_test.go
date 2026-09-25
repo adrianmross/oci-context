@@ -341,6 +341,50 @@ token_services:
 	}
 }
 
+func TestServiceImportPreviewsThenAppliesFromStdin(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatal(err)
+	}
+	handoff := `{
+  "schemaVersion": "oci-idm.handoff.oci-context.v1",
+  "currentService": "example-service",
+  "tokenServices": [{
+    "name": "example-service",
+    "type": "oauth",
+    "flow": "authorization-code",
+    "issuer": "https://example.identity.oraclecloud.com",
+    "clientId": "example-client",
+    "scope": "https://service.example.com"
+  }]
+}`
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := newRootCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetIn(strings.NewReader(handoff))
+		cmd.SetArgs(append([]string{"service", "import", "--config", cfgPath, "--set-current"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out.String())
+		}
+		return out.String()
+	}
+	if out := run(); !strings.Contains(out, "Would import") || !strings.Contains(out, "re-run with --apply") {
+		t.Fatalf("unexpected preview:\n%s", out)
+	}
+	if _, ok := findTokenService(mustLoadConfig(t, cfgPath), "example-service"); ok {
+		t.Fatal("preview wrote config")
+	}
+	run("--apply")
+	cfg := mustLoadConfig(t, cfgPath)
+	if cfg.CurrentService != "example-service" {
+		t.Fatalf("current service = %q", cfg.CurrentService)
+	}
+}
+
 func mustLoadConfig(t *testing.T, path string) config.Config {
 	t.Helper()
 	cfg, err := config.Load(path)

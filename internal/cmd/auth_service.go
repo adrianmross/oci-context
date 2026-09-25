@@ -133,7 +133,7 @@ func newServiceCmd() *cobra.Command {
 	cmd.AddCommand(newAuthServiceListCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceGetCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceAddCmd(resolvePath))
-	cmd.AddCommand(newAuthServiceImportCmd(resolvePath))
+	cmd.AddCommand(newAuthServicePreviewImportCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceDiscoverCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceVerifyCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceSyncCmd(resolvePath))
@@ -221,6 +221,10 @@ func newAuthServiceListCmd(resolvePath authServiceResolvePathFunc) *cobra.Comman
 
 func newAuthServiceImportCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
 	return newAuthServiceUpsertCmd(resolvePath, "import", "Import token services from an oci-idm handoff file", true, false)
+}
+
+func newAuthServicePreviewImportCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
+	return newAuthServiceUpsertCmd(resolvePath, "import", "Preview or apply token services from an oci-idm export", false, true)
 }
 
 func newAuthServiceAddCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
