@@ -591,3 +591,11 @@ or:
 ```json
 { "ok": false, "error": "..." }
 ```
+
+Create a session context and enroll it in background auth monitoring in one command:
+
+```sh
+oci-context create dev --profile dev --auth-method security_token --monitor --global
+```
+
+Monitoring requires a daemon running with `--auto-refresh` (set up with `oci-context daemon install`). It preserves the existing monitor list. An expired session that OCI can no longer refresh still requires a fresh login.

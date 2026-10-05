@@ -14,6 +14,7 @@ import (
 func newAddCmd() *cobra.Command {
 	var cfgPath string
 	var ctx config.Context
+	var monitor bool
 
 	cmd := &cobra.Command{
 		Use:     "create [name]",
@@ -48,7 +49,11 @@ func newAddCmd() *cobra.Command {
 			if err := cfg.UpsertContext(ctx); err != nil {
 				return err
 			}
-			if err := config.Save(path, cfg); err != nil {
+			if monitor {
+				if _, err := ensureDaemonMonitorContexts(path, cfg, []string{ctx.Name}); err != nil {
+					return err
+				}
+			} else if err := config.Save(path, cfg); err != nil {
 				return err
 			}
 			if err := syncOCIDefaultsForCurrent(cfg); err != nil {
@@ -59,6 +64,7 @@ func newAddCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().BoolVar(&monitor, "monitor", false, "Add context to daemon auth monitoring (requires a running auto-refresh daemon)")
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
 	cmd.Flags().StringVarP(&ctx.Name, "name", "n", "", "Context name")
 	cmd.Flags().StringVarP(&ctx.Profile, "profile", "p", "", "OCI CLI profile (default: options.default_profile, then DEFAULT)")
