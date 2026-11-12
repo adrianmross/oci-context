@@ -15,6 +15,7 @@ Operational guide for maintaining `oci-context` daemon behavior and auth monitor
 ## Monitored Contexts
 - Monitored contexts are configured in `options.daemon_contexts`.
 - If list is empty, daemon falls back to `current_context`.
+- Enroll during creation with `oci-context create <name> --auth-method security_token --monitor`.
 - Manage list via CLI:
   - `oci-context daemon monitor list`
   - `oci-context daemon monitor add <context...>`

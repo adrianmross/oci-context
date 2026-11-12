@@ -52,6 +52,35 @@ func TestCreateInheritsProfileAndUsesOverrides(t *testing.T) {
 	}
 }
 
+func TestCreateMonitorPreservesAndDeduplicates(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	path := filepath.Join(tmp, "config.yml")
+	cfg := config.Config{Options: config.Options{DaemonContexts: []string{"existing"}}}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		cmd := newRootCmd()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetArgs([]string{"create", "session", "--config", path, "--profile", "session", "--tenancy", "ocid1.tenancy.oc1..example", "--user", "ocid1.user.oc1..example", "--region", "us-phoenix-1", "--auth-method", "security_token", "--monitor"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got.Options.DaemonContexts, ",") != "existing,session" {
+		t.Fatalf("monitor list: %v", got.Options.DaemonContexts)
+	}
+	ctx, err := got.GetContext("session")
+	if err != nil || ctx.AuthMethod != config.AuthMethodSecurityToken {
+		t.Fatalf("context: %+v, %v", ctx, err)
+	}
+}
+
 func TestEditAndDeleteContextForms(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yml")
