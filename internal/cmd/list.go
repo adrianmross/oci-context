@@ -17,8 +17,10 @@ func newListCmd() *cobra.Command {
 	var verbose bool
 
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List contexts",
+		Use:     "get [context|contexts]",
+		Aliases: []string{"list"},
+		Short:   "List contexts",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useGlobal, err := cmd.Flags().GetBool("global")
 			if err != nil {
@@ -31,6 +33,19 @@ func newListCmd() *cobra.Command {
 			cfg, err := config.Load(path)
 			if err != nil {
 				return err
+			}
+			if len(args) == 1 {
+				switch args[0] {
+				case "context":
+					if cfg.CurrentContext == "" {
+						return fmt.Errorf("no current context set")
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), cfg.CurrentContext)
+					return nil
+				case "contexts", "list", "get":
+				default:
+					return fmt.Errorf("get supports context or contexts")
+				}
 			}
 
 			switch strings.ToLower(output) {

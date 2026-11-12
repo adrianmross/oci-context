@@ -15,6 +15,8 @@ import (
 type authServiceResolvePathFunc func(*cobra.Command) (string, error)
 
 type tokenServiceImportDocument struct {
+	APIVersion          string                    `yaml:"apiVersion" json:"apiVersion"`
+	Kind                string                    `yaml:"kind" json:"kind"`
 	CurrentService      string                    `yaml:"current_service" json:"current_service"`
 	CamelCurrentService string                    `yaml:"currentService" json:"currentService"`
 	TokenServices       []config.TokenService     `yaml:"token_services" json:"token_services"`
@@ -82,6 +84,20 @@ type authServiceImportResult struct {
 	Updated        []string `json:"updated" yaml:"updated"`
 	Unchanged      []string `json:"unchanged" yaml:"unchanged"`
 	CurrentService string   `json:"current_service,omitempty" yaml:"current_service,omitempty"`
+	Next           []string `json:"next,omitempty" yaml:"next,omitempty"`
+}
+
+type authServiceVerifyResult struct {
+	Service     string                      `json:"service" yaml:"service"`
+	HandoffFile string                      `json:"handoff_file" yaml:"handoff_file"`
+	Matches     []string                    `json:"matches" yaml:"matches"`
+	Mismatches  []authServiceVerifyMismatch `json:"mismatches,omitempty" yaml:"mismatches,omitempty"`
+}
+
+type authServiceVerifyMismatch struct {
+	Field    string `json:"field" yaml:"field"`
+	Expected string `json:"expected" yaml:"expected"`
+	Actual   string `json:"actual" yaml:"actual"`
 }
 
 func newAuthServiceCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
@@ -93,6 +109,9 @@ func newAuthServiceCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
 	cmd.AddCommand(newAuthServiceGetCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceImportCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceAddCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceDiscoverCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceVerifyCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceSyncCmd(resolvePath))
 	return cmd
 }
 
@@ -116,8 +135,31 @@ func newServiceCmd() *cobra.Command {
 	cmd.AddCommand(newAuthServiceListCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceGetCmd(resolvePath))
 	cmd.AddCommand(newAuthServiceAddCmd(resolvePath))
-	cmd.AddCommand(newAuthServiceImportCmd(resolvePath))
+	cmd.AddCommand(newAuthServicePreviewImportCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceDiscoverCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceVerifyCmd(resolvePath))
+	cmd.AddCommand(newAuthServiceSyncCmd(resolvePath))
 	_ = useGlobal
+	return cmd
+}
+
+func newHandoffCmd() *cobra.Command {
+	resolvePath := func(cmd *cobra.Command) (string, error) {
+		cfgPath, err := cmd.Flags().GetString("config")
+		if err != nil {
+			return "", err
+		}
+		useGlobal, err := cmd.Flags().GetBool("global")
+		if err != nil {
+			return "", err
+		}
+		return resolveConfigPath(cfgPath, useGlobal)
+	}
+	cmd := &cobra.Command{
+		Use:   "handoff",
+		Short: "Accept reviewed configuration handoffs",
+	}
+	cmd.AddCommand(newAuthServiceUpsertCmd(resolvePath, "accept", "Preview or apply a reviewed oci-idm token-service handoff", true, true))
 	return cmd
 }
 
@@ -180,29 +222,198 @@ func newAuthServiceListCmd(resolvePath authServiceResolvePathFunc) *cobra.Comman
 }
 
 func newAuthServiceImportCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
-	return newAuthServiceUpsertCmd(resolvePath, "import", "Import token services from an oci-idm handoff file", true)
+	return newAuthServiceUpsertCmd(resolvePath, "import", "Import token services from an oci-idm handoff file", true, false)
+}
+
+func newAuthServicePreviewImportCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
+	return newAuthServiceUpsertCmd(resolvePath, "import", "Preview or apply token services from an oci-idm export", false, true)
 }
 
 func newAuthServiceAddCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
-	return newAuthServiceUpsertCmd(resolvePath, "add", "Add token services from stdin or a handoff file", false)
+	return newAuthServiceUpsertCmd(resolvePath, "add", "Add token services from stdin or a handoff file", false, false)
 }
 
-func newAuthServiceUpsertCmd(resolvePath authServiceResolvePathFunc, use string, short string, requireFile bool) *cobra.Command {
+func newAuthServiceSyncCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
+	return newAuthServiceUpsertCmd(resolvePath, "sync", "Preview or apply a reviewed oci-idm handoff", true, true)
+}
+
+func newAuthServiceDiscoverCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
+	var issuer string
+	var clientID string
+	var scope string
+	var flow string
+	var redirectURL string
+	var clientSecretEnv string
+	var offlineAccess bool
+	var output string
+	var dryRun bool
+	var setCurrent bool
+
+	cmd := &cobra.Command{
+		Use:   "discover <name>",
+		Short: "Discover issuer endpoints and save a token service",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			issuer = strings.TrimSpace(issuer)
+			clientID = strings.TrimSpace(clientID)
+			scope = strings.TrimSpace(scope)
+			if name == "" || issuer == "" || clientID == "" || scope == "" {
+				return fmt.Errorf("name, --issuer, --client-id, and --scope are required")
+			}
+			discovery, err := fetchOAuthDiscovery(issuer)
+			if err != nil {
+				return err
+			}
+			if discovery.TokenEndpoint == "" {
+				return fmt.Errorf("issuer discovery did not provide token endpoint")
+			}
+			service := config.TokenService{
+				Name:                  name,
+				Type:                  config.TokenServiceTypeOAuth,
+				Flow:                  normalizeOAuthFlow(flow),
+				Issuer:                issuer,
+				AuthorizationEndpoint: discovery.AuthorizationEndpoint,
+				TokenEndpoint:         discovery.TokenEndpoint,
+				DeviceEndpoint:        discovery.DeviceAuthorizationEndpoint,
+				ClientID:              clientID,
+				ClientSecretEnv:       strings.TrimSpace(clientSecretEnv),
+				Scope:                 scope,
+				RedirectURL:           strings.TrimSpace(redirectURL),
+				OfflineAccess:         offlineAccess,
+			}
+			path, err := resolvePath(cmd)
+			if err != nil {
+				return err
+			}
+			cfg, err := config.Load(path)
+			if err != nil {
+				return err
+			}
+			result := importTokenServices(&cfg, []config.TokenService{service})
+			if setCurrent {
+				cfg.CurrentService = name
+				result.CurrentService = name
+			}
+			result.ConfigPath = path
+			result.DryRun = dryRun
+			if !dryRun {
+				if err := config.Save(path, cfg); err != nil {
+					return err
+				}
+			}
+			return printAuthServiceImportResult(cmd, result, output)
+		},
+	}
+	cmd.Flags().StringVar(&issuer, "issuer", "", "OAuth issuer URL used for well-known discovery")
+	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client id")
+	cmd.Flags().StringVar(&scope, "scope", "", "OAuth resource scope")
+	cmd.Flags().StringVar(&flow, "flow", "authorization-code", "OAuth flow")
+	cmd.Flags().StringVar(&redirectURL, "redirect-url", "", "OAuth authorization-code loopback redirect URL")
+	cmd.Flags().StringVar(&clientSecretEnv, "client-secret-env", "", "Environment variable holding a confidential-client secret")
+	cmd.Flags().BoolVar(&offlineAccess, "offline-access", false, "Request an OAuth refresh token")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview changes without writing config")
+	cmd.Flags().BoolVar(&setCurrent, "set-current", false, "Set this token service as current")
+	return cmd
+}
+
+func nextAuthServiceSteps(result authServiceImportResult) []string {
+	if result.DryRun {
+		return []string{"Review this preview, then re-run with --apply to write and verify it."}
+	}
+	if result.CurrentService == "" {
+		return nil
+	}
+	return []string{
+		fmt.Sprintf("oci-context auth token --service %q --format raw >/dev/null", result.CurrentService),
+		fmt.Sprintf("oci-context whoami --service %q", result.CurrentService),
+	}
+}
+
+func newAuthServiceVerifyCmd(resolvePath authServiceResolvePathFunc) *cobra.Command {
+	var file string
+	var output string
+	cmd := &cobra.Command{
+		Use:   "verify [name]",
+		Short: "Verify a configured token service against an oci-idm handoff",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(file) == "" {
+				return fmt.Errorf("--file is required")
+			}
+			payload, err := readTokenServicesImport(file, cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			path, err := resolvePath(cmd)
+			if err != nil {
+				return err
+			}
+			cfg, err := config.Load(path)
+			if err != nil {
+				return err
+			}
+			name := strings.TrimSpace(cfg.CurrentService)
+			if len(args) == 1 {
+				name = strings.TrimSpace(args[0])
+			}
+			if name == "" {
+				name, err = selectCurrentServiceForImport(payload, "")
+				if err != nil {
+					return err
+				}
+			}
+			expectedIndex := tokenServiceIndex(payload.TokenServices, name)
+			if expectedIndex == -1 {
+				return fmt.Errorf("token service %q not found in handoff", name)
+			}
+			actualIndex := tokenServiceIndex(cfg.TokenServices, name)
+			if actualIndex == -1 {
+				return fmt.Errorf("token service %q is not configured", name)
+			}
+			result := verifyTokenService(name, file, payload.TokenServices[expectedIndex], cfg.TokenServices[actualIndex])
+			if err := printAuthServiceVerifyResult(cmd, result, output); err != nil {
+				return err
+			}
+			if len(result.Mismatches) > 0 {
+				return fmt.Errorf("token service %q differs from its handoff", name)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&file, "file", "f", "", "Path to an oci-idm oci-context handoff YAML or JSON")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
+	return cmd
+}
+
+func newAuthServiceUpsertCmd(resolvePath authServiceResolvePathFunc, use string, short string, requireFile bool, previewByDefault bool) *cobra.Command {
 	var file string
 	var output string
 	var dryRun bool
+	var apply bool
 	var setCurrent bool
 	var currentService string
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if previewByDefault {
+				dryRun = !apply
+			}
 			if requireFile && strings.TrimSpace(file) == "" {
 				return fmt.Errorf("--file is required")
 			}
 			payload, err := readTokenServicesImport(file, cmd.InOrStdin())
 			if err != nil {
 				return err
+			}
+			if previewByDefault {
+				for _, service := range payload.TokenServices {
+					if service.ClientSecret != "" || service.Assertion != "" || service.ClientAssertion != "" || service.SubjectToken != "" {
+						return fmt.Errorf("handoff for %q contains inline credentials; use environment references instead", service.Name)
+					}
+				}
 			}
 			path, err := resolvePath(cmd)
 			if err != nil {
@@ -230,13 +441,32 @@ func newAuthServiceUpsertCmd(resolvePath authServiceResolvePathFunc, use string,
 				if err := config.Save(path, cfg); err != nil {
 					return err
 				}
+				if previewByDefault {
+					saved, err := config.Load(path)
+					if err != nil {
+						return err
+					}
+					for _, expected := range payload.TokenServices {
+						index := tokenServiceIndex(saved.TokenServices, expected.Name)
+						if index == -1 || len(verifyTokenService(expected.Name, file, expected, saved.TokenServices[index]).Mismatches) > 0 {
+							return fmt.Errorf("token service %q differs from its handoff after import", expected.Name)
+						}
+					}
+				}
+			}
+			if previewByDefault {
+				result.Next = nextAuthServiceSteps(result)
 			}
 			return printAuthServiceImportResult(cmd, result, output)
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "Path to oci-idm oci-context handoff YAML or JSON, or - for stdin")
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview changes without writing config")
+	if previewByDefault {
+		cmd.Flags().BoolVar(&apply, "apply", false, "Write the reviewed local changes and verify them")
+	} else {
+		cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview changes without writing config")
+	}
 	cmd.Flags().BoolVar(&setCurrent, "set-current", false, "Set current_service to the imported target")
 	cmd.Flags().StringVar(&currentService, "service", "", "Imported token service to mark current with --set-current")
 	if requireFile {
@@ -253,6 +483,12 @@ func readTokenServicesImport(path string, stdin io.Reader) (tokenServiceImportPa
 	var doc tokenServiceImportDocument
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return tokenServiceImportPayload{}, err
+	}
+	if doc.APIVersion != "" && doc.APIVersion != "oci-idm.oracle.com/v1" {
+		return tokenServiceImportPayload{}, fmt.Errorf("unsupported token-service export apiVersion %q", doc.APIVersion)
+	}
+	if doc.Kind != "" && doc.Kind != "OCIContextTokenServiceExport" {
+		return tokenServiceImportPayload{}, fmt.Errorf("unsupported token-service export kind %q", doc.Kind)
 	}
 	services := make([]config.TokenService, 0, len(doc.TokenServices)+len(doc.CamelTokenServices))
 	services = append(services, doc.TokenServices...)
@@ -381,6 +617,40 @@ func tokenServicesEqual(a, b config.TokenService) bool {
 	return string(left) == string(right)
 }
 
+func verifyTokenService(name string, handoffFile string, expected config.TokenService, actual config.TokenService) authServiceVerifyResult {
+	result := authServiceVerifyResult{Service: name, HandoffFile: handoffFile}
+	for _, field := range []struct {
+		name     string
+		expected string
+		actual   string
+	}{
+		{"type", expected.Type, actual.Type},
+		{"flow", expected.Flow, actual.Flow},
+		{"issuer", expected.Issuer, actual.Issuer},
+		{"client_id", expected.ClientID, actual.ClientID},
+		{"scope", expected.Scope, actual.Scope},
+		{"redirect_url", expected.RedirectURL, actual.RedirectURL},
+		{"authorization_endpoint", expected.AuthorizationEndpoint, actual.AuthorizationEndpoint},
+		{"token_endpoint", expected.TokenEndpoint, actual.TokenEndpoint},
+	} {
+		if strings.TrimSpace(field.expected) == strings.TrimSpace(field.actual) {
+			result.Matches = append(result.Matches, field.name)
+			continue
+		}
+		result.Mismatches = append(result.Mismatches, authServiceVerifyMismatch{
+			Field: field.name, Expected: field.expected, Actual: field.actual,
+		})
+	}
+	if expected.OfflineAccess == actual.OfflineAccess {
+		result.Matches = append(result.Matches, "offline_access")
+	} else {
+		result.Mismatches = append(result.Mismatches, authServiceVerifyMismatch{
+			Field: "offline_access", Expected: fmt.Sprint(expected.OfflineAccess), Actual: fmt.Sprint(actual.OfflineAccess),
+		})
+	}
+	return result
+}
+
 func viewTokenService(service config.TokenService) authServiceView {
 	view := authServiceView{
 		Name:                          service.Name,
@@ -462,6 +732,32 @@ func printAuthService(cmd *cobra.Command, service authServiceView, output string
 	}
 }
 
+func printAuthServiceVerifyResult(cmd *cobra.Command, result authServiceVerifyResult, output string) error {
+	switch strings.ToLower(strings.TrimSpace(output)) {
+	case "", "text":
+		if len(result.Mismatches) == 0 {
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "verified: %s matches %s\n", result.Service, result.HandoffFile)
+			return err
+		}
+		for _, mismatch := range result.Mismatches {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "mismatch: %s expected=%q actual=%q\n", mismatch.Field, mismatch.Expected, mismatch.Actual); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "json":
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	case "yaml", "yml":
+		enc := yaml.NewEncoder(cmd.OutOrStdout())
+		defer enc.Close()
+		return enc.Encode(result)
+	default:
+		return fmt.Errorf("unsupported output format: %s", output)
+	}
+}
+
 func printAuthServiceImportResult(cmd *cobra.Command, result authServiceImportResult, output string) error {
 	switch strings.ToLower(strings.TrimSpace(output)) {
 	case "", "text":
@@ -481,6 +777,9 @@ func printAuthServiceImportResult(cmd *cobra.Command, result authServiceImportRe
 		}
 		if result.CurrentService != "" {
 			fmt.Fprintf(cmd.OutOrStdout(), "current_service: %s\n", result.CurrentService)
+		}
+		for _, step := range result.Next {
+			fmt.Fprintf(cmd.OutOrStdout(), "next: %s\n", step)
 		}
 		return nil
 	case "json":

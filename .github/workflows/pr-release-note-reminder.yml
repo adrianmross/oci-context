@@ -43,5 +43,5 @@ jobs:
 
             await github.rest.issues.createComment({
               owner, repo, issue_number: pr.number,
-              body: `${marker}\n\nThis PR looks release-bearing, but it has no changelogger fragment. If that is intentional, add **[no-release]** to the PR title or body. Otherwise run \\`changelogger\\` and commit the generated \`.changelogs/*\\` file. This is a reminder only; it does not block the PR.`
+              body: `${marker}\n\nThis PR looks release-bearing, but it has no changelogger fragment. If that is intentional, add **[no-release]** to the PR title or body. Otherwise run \`changelogger\` and commit the generated \`.changelogs/*\` file. This is a reminder only; it does not block the PR.`
             });

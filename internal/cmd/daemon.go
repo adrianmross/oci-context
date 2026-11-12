@@ -93,7 +93,6 @@ func newDaemonCmd() *cobra.Command {
 	cmd.AddCommand(newDaemonInstallCmd())
 	cmd.AddCommand(newDaemonRepairCmd())
 	cmd.AddCommand(newDaemonRecoverCmd())
-	cmd.AddCommand(newDaemonUpCmd())
 	cmd.AddCommand(newDaemonDoctorCmd())
 	cmd.AddCommand(newDaemonServeCmd())
 	cmd.AddCommand(newDaemonAuthStatusCmd())
@@ -111,30 +110,13 @@ func newDaemonRecoverCmd() *cobra.Command {
 	var contextName string
 	var output string
 	cmd := &cobra.Command{
-		Use:   "recover",
+		Use:   "restart",
 		Short: "Restart launchd daemon and trigger immediate auth maintenance (macOS)",
 		Aliases: []string{
+			"recover",
 			"fix",
+			"up",
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDaemonRecoverCmd(cmd, cfgPath, label, contextName, output)
-		},
-	}
-	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to config file")
-	cmd.Flags().StringVar(&label, "label", daemonLaunchdDefaultLabel, "launchd label")
-	cmd.Flags().StringVar(&contextName, "context", "", "Target context name for nudge (default monitored list)")
-	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text|json|yaml")
-	return cmd
-}
-
-func newDaemonUpCmd() *cobra.Command {
-	var cfgPath string
-	var label string
-	var contextName string
-	var output string
-	cmd := &cobra.Command{
-		Use:   "up",
-		Short: "Restart daemon and trigger immediate auth maintenance (macOS)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDaemonRecoverCmd(cmd, cfgPath, label, contextName, output)
 		},
@@ -201,9 +183,10 @@ func newDaemonDoctorCmd() *cobra.Command {
 	var contextName string
 	var output string
 	cmd := &cobra.Command{
-		Use:   "doctor",
+		Use:   "describe",
 		Short: "Diagnose daemon health and suggest remediation steps",
 		Aliases: []string{
+			"doctor",
 			"check",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -822,8 +805,9 @@ func newDaemonAuthStatusCmd() *cobra.Command {
 	var output string
 
 	cmd := &cobra.Command{
-		Use:   "auth-status",
-		Short: "Show daemon runtime auth status for the current or specified context",
+		Use:     "status",
+		Aliases: []string{"auth-status"},
+		Short:   "Show daemon runtime auth status for the current or specified context",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := daemon.EnsureConfig(cfgPath)
 			if err != nil {

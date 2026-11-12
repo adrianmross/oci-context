@@ -695,6 +695,7 @@ func newAuthCmd() *cobra.Command {
 	methodsCmd.Flags().StringVarP(&methodsOutput, "output", "o", "text", "Output format: text|json|yaml")
 	cmd.AddCommand(methodsCmd)
 	cmd.AddCommand(newAuthTokenCmd(resolvePath, loadTarget))
+	cmd.AddCommand(newAuthSubjectCmd(resolvePath, loadTarget))
 	cmd.AddCommand(newAuthServiceCmd(resolvePath))
 
 	var bootstrapProfile, publicKeyFile string

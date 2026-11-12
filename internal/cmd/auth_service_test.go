@@ -3,6 +3,9 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +13,49 @@ import (
 
 	"github.com/adrianmross/oci-context/pkg/config"
 )
+
+func TestAuthServiceDiscoverSavesDiscoveredEndpoints(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintf(w, `{"authorization_endpoint":%q,"token_endpoint":%q,"device_authorization_endpoint":%q}`,
+			server.URL+"/authorize", server.URL+"/token", server.URL+"/device")
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"service", "discover", "example-service", "--config", cfgPath, "--issuer", server.URL, "--client-id", "example-client", "--scope", "https://service.example.com", "--flow", "authorization-code", "--set-current"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("discover service: %v\n%s", err, out.String())
+	}
+
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	service, ok := findTokenService(loaded, "example-service")
+	if !ok {
+		t.Fatal("expected discovered service")
+	}
+	if service.AuthorizationEndpoint != server.URL+"/authorize" || service.TokenEndpoint != server.URL+"/token" || service.DeviceEndpoint != server.URL+"/device" {
+		t.Fatalf("unexpected discovered endpoints: %+v", service)
+	}
+	if service.ClientID != "example-client" || service.Scope != "https://service.example.com" || loaded.CurrentService != "example-service" {
+		t.Fatalf("unexpected discovered service: %+v", service)
+	}
+}
 
 func TestAuthServiceImportYAMLFragment(t *testing.T) {
 	tmp := t.TempDir()
@@ -126,6 +172,244 @@ func TestAuthServiceImportOCIIDMJSONHandoffDryRun(t *testing.T) {
 	if _, ok := findTokenService(loaded, "obp-jwt-service"); ok {
 		t.Fatal("dry-run should not persist imported token service")
 	}
+}
+
+func TestServiceImportRejectsUnsupportedExportContract(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetIn(strings.NewReader(`{"apiVersion":"example.invalid/v2","kind":"OCIContextTokenServiceExport","tokenServices":[{"name":"example","type":"oauth","flow":"authorization-code","issuer":"https://example.identity.oraclecloud.com","clientId":"example-client","scope":"https://service.example.com"}]}`))
+	cmd.SetArgs([]string{"service", "import", "--config", cfgPath})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unsupported token-service export apiVersion") {
+		t.Fatalf("expected contract error, got %v\n%s", err, out.String())
+	}
+}
+
+func TestServiceVerifyHandoffDetectsRedirectDrift(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	cfg := config.DefaultConfig(tmp)
+	cfg.CurrentService = "example-service"
+	cfg.TokenServices = append(cfg.TokenServices, config.TokenService{
+		Name: "example-service", Type: "oauth", Flow: "authorization-code",
+		Issuer: "https://example.identity.oraclecloud.com", ClientID: "example-client",
+		Scope: "https://service.example.com", RedirectURL: "http://127.0.0.1:8180/callback",
+		AuthorizationEndpoint: "https://example.identity.oraclecloud.com/oauth2/v1/authorize",
+		TokenEndpoint:         "https://example.identity.oraclecloud.com/oauth2/v1/token", OfflineAccess: true,
+	})
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	handoffPath := filepath.Join(tmp, "oci-context.handoff.json")
+	if err := os.WriteFile(handoffPath, []byte(`{
+  "currentService": "example-service",
+  "tokenServices": [{
+    "name": "example-service", "type": "oauth", "flow": "authorization-code",
+    "issuer": "https://example.identity.oraclecloud.com", "clientId": "example-client",
+    "scope": "https://service.example.com", "redirectUrl": "http://127.0.0.1:8180/callback",
+    "authorizationEndpoint": "https://example.identity.oraclecloud.com/oauth2/v1/authorize",
+    "tokenEndpoint": "https://example.identity.oraclecloud.com/oauth2/v1/token", "offlineAccess": true
+  }]
+}`), 0o600); err != nil {
+		t.Fatalf("write handoff: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"service", "verify", "--config", cfgPath, "--file", handoffPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("verify matching handoff: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "verified: example-service") {
+		t.Fatalf("unexpected verify output: %s", out.String())
+	}
+
+	cfg.TokenServices[len(cfg.TokenServices)-1].RedirectURL = "http://127.0.0.1:8282/callback"
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatalf("save drifted config: %v", err)
+	}
+	cmd = newRootCmd()
+	out.Reset()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"service", "verify", "--config", cfgPath, "--file", handoffPath})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected redirect drift to fail verification")
+	}
+	if !strings.Contains(out.String(), "mismatch: redirect_url") {
+		t.Fatalf("unexpected drift output: %s", out.String())
+	}
+}
+
+func TestServiceSyncPreviewsThenAppliesReviewedHandoff(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatal(err)
+	}
+	handoffPath := filepath.Join(tmp, "handoff.yml")
+	if err := os.WriteFile(handoffPath, []byte(`current_service: example-service
+token_services:
+  - name: example-service
+    type: oauth
+    flow: authorization-code
+    issuer: https://example.identity.oraclecloud.com
+    client_id: example-client
+    scope: https://service.example.com
+    redirect_url: http://127.0.0.1:8180/callback
+    authorization_endpoint: https://example.identity.oraclecloud.com/oauth2/v1/authorize
+    token_endpoint: https://example.identity.oraclecloud.com/oauth2/v1/token
+    offline_access: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := newRootCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(append([]string{"service"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out.String())
+		}
+		return out.String()
+	}
+	if out := run("sync", "--config", cfgPath, "--file", handoffPath, "--set-current"); !strings.Contains(out, "added: example-service") {
+		t.Fatalf("missing preview: %s", out)
+	}
+	before, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findTokenService(before, "example-service"); ok {
+		t.Fatal("preview wrote config")
+	}
+	run("sync", "--config", cfgPath, "--file", handoffPath, "--set-current", "--apply")
+	after, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.CurrentService != "example-service" {
+		t.Fatalf("wrong current service: %q", after.CurrentService)
+	}
+	run("verify", "--config", cfgPath, "--file", handoffPath)
+	inlinePath := filepath.Join(tmp, "inline.yml")
+	data, err := os.ReadFile(handoffPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inlinePath, append(data, []byte("    client_secret: forbidden\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"service", "sync", "--config", cfgPath, "--file", inlinePath, "--apply"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "inline credentials") {
+		t.Fatalf("expected inline credential rejection, got %v", err)
+	}
+}
+
+func TestHandoffAcceptPreviewsThenAppliesAndPrintsSafeNextSteps(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatal(err)
+	}
+	handoffPath := filepath.Join(tmp, "handoff.yml")
+	if err := os.WriteFile(handoffPath, []byte(`current_service: example-service
+token_services:
+  - name: example-service
+    type: oauth
+    flow: authorization-code
+    issuer: https://example.identity.oraclecloud.com
+    client_id: example-client
+    scope: https://service.example.com
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := newRootCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(append([]string{"handoff", "accept", "--config", cfgPath, "--file", handoffPath, "--set-current"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out.String())
+		}
+		return out.String()
+	}
+	if out := run(); !strings.Contains(out, "Would import") || !strings.Contains(out, "re-run with --apply") {
+		t.Fatalf("unexpected preview:\n%s", out)
+	}
+	if _, ok := findTokenService(mustLoadConfig(t, cfgPath), "example-service"); ok {
+		t.Fatal("preview wrote config")
+	}
+	if out := run("--apply"); !strings.Contains(out, "auth token --service \"example-service\"") || !strings.Contains(out, "whoami --service \"example-service\"") {
+		t.Fatalf("missing next steps:\n%s", out)
+	}
+}
+
+func TestServiceImportPreviewsThenAppliesFromStdin(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yml")
+	if err := config.Save(cfgPath, config.DefaultConfig(tmp)); err != nil {
+		t.Fatal(err)
+	}
+	handoff := `{
+  "schemaVersion": "oci-idm.handoff.oci-context.v1",
+  "currentService": "example-service",
+  "tokenServices": [{
+    "name": "example-service",
+    "type": "oauth",
+    "flow": "authorization-code",
+    "issuer": "https://example.identity.oraclecloud.com",
+    "clientId": "example-client",
+    "scope": "https://service.example.com"
+  }]
+}`
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := newRootCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetIn(strings.NewReader(handoff))
+		cmd.SetArgs(append([]string{"service", "import", "--config", cfgPath, "--set-current"}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out.String())
+		}
+		return out.String()
+	}
+	if out := run(); !strings.Contains(out, "Would import") || !strings.Contains(out, "re-run with --apply") {
+		t.Fatalf("unexpected preview:\n%s", out)
+	}
+	if _, ok := findTokenService(mustLoadConfig(t, cfgPath), "example-service"); ok {
+		t.Fatal("preview wrote config")
+	}
+	run("--apply")
+	cfg := mustLoadConfig(t, cfgPath)
+	if cfg.CurrentService != "example-service" {
+		t.Fatalf("current service = %q", cfg.CurrentService)
+	}
+}
+
+func mustLoadConfig(t *testing.T, path string) config.Config {
+	t.Helper()
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
 }
 
 func TestServiceAddFromStdinSetsCurrentService(t *testing.T) {

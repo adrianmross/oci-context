@@ -63,13 +63,13 @@ Create or update local config:
 
 ```bash
 oci-context init
-oci-context create dev \
+oci-context create context dev \
   --compartment ocid1.compartment.oc1..bbbb \
   --region us-phoenix-1
 oci-context use dev
 ```
 
-`create` inherits the tenancy, user, and API-key profile from
+`create context` inherits the tenancy, user, and API-key profile from
 `options.default_profile` (or the OCI `DEFAULT` profile), so only the new
 context name and target compartment/region are needed. Use `--profile` to
 choose another OCI CLI profile. `add` remains an alias.
@@ -77,8 +77,8 @@ choose another OCI CLI profile. `add` remains an alias.
 Check the active context:
 
 ```bash
-oci-context current
-oci-context status
+oci-context get context
+oci-context describe context
 ```
 
 Make sure auth is ready before automation:
@@ -110,6 +110,23 @@ preferred when the issuer advertises an authorization endpoint, and Device Code
 is used only when that is the available interactive flow. Define additional
 services in config when another tool should use a different issuer, client,
 scope, redirect URL, or flow:
+
+For a new OIDC client, discover endpoints from the issuer instead of copying
+them into a handoff file. The client ID, scope, and flow remain application
+settings and are supplied explicitly:
+
+```bash
+oci-context service discover example-service \
+  --issuer https://example.identity.oraclecloud.com \
+  --client-id example-client \
+  --scope https://service.example.com \
+  --flow authorization-code \
+  --set-current
+```
+
+Use `--redirect-url` when the client registers a specific loopback callback.
+For a confidential client, use `--client-secret-env`; never put the secret in
+the command or configuration.
 
 ```yaml
 current_service: obp
@@ -164,18 +181,29 @@ for one-shot consumers that need an `OCHAIN_TOKEN` value in the payload:
 oci-context tool setup ochain --include-token
 ```
 
-`oci-idm` materializes `oci-context-token-services.yml` and
-`oci-context.handoff.json` files for planned Identity Domains apps. Import
-either handoff shape directly:
+For a saved Identity Domains plan, preview its generated token services without
+writing an intermediate handoff file:
 
 ```bash
-oci-context service add \
-  --file ./idm-artifacts/oci-context-token-services.yml \
+set -o pipefail
+oci-idm export --shape ocix --plan idm-plan.json |
+  oci-context service import \
   --set-current
-
-oci-context service list
-oci-context service get
+# Review the added/updated service names and current service, then repeat with:
+oci-idm export --shape ocix --plan idm-plan.json |
+  oci-context service import \
+  --set-current --apply
 ```
+
+`export --shape ocix` and `service import` use the same
+secret-free JSON contract: `apiVersion: oci-idm.oracle.com/v1` and
+`kind: OCIContextTokenServiceExport`. Legacy exports without those fields stay
+supported; an explicit incompatible version is rejected. `service import`
+previews local config changes by default. `--apply` writes them and checks the
+saved OAuth contract against the export. It never creates or changes an
+Identity Domain app. `handoff accept` and `service sync` remain supported for
+existing scripts; use `service verify` with a saved export later to detect
+drift.
 
 `service get [name]` defaults to `current_service` and emits JSON by default.
 The document contains redacted OAuth metadata plus a structured `credential`
@@ -209,6 +237,20 @@ oci-idm get defaults --service obp |
 
 oci-context auth token --service obp --no-login --format raw
 ```
+
+For a metadata-only view of the cached token subject, require the target
+issuer explicitly. The command emits only service, context, issuer, subject,
+and expiry metadata; it never prints the access token or other claims:
+
+```bash
+oci-context whoami \
+  --service example-service \
+  --require-issuer https://idcs-example.identity.oraclecloud.com
+```
+
+`oci-context whoami` is the short form of `oci-context auth subject`; both
+have the same JSON output and issuer/expiry checks. `oci-context status` is
+separate: it reports the OCI administrative context that authorizes changes.
 
 For the common Red Wiz OABCS target, select the OCI context for `oabcs1` in the
 default domain and configure the chaincode deploy environment for
@@ -398,23 +440,27 @@ oci-context --version
 oci-context version -o text|json|yaml
 oci-context paths -o text|json|yaml
 oci-context init
-oci-context list
-oci-context current
+oci-context get contexts
+oci-context get context
 oci-context use <name>
-oci-context create [name]
-oci-context set <name> --field value
-oci-context delete <name>
-oci-context status --cached -o json
+oci-context create context [name]
+oci-context edit context <name> --field value
+oci-context delete context <name>
+oci-context describe context --cached -o json
 oci-context doctor --output json
 oci-context oci -- <oci args...>
 oci-context auth methods|show|set|set-user|login|refresh|ensure|validate|setup|notify
 oci-context daemon serve
-oci-context daemon up
+oci-context daemon restart
 oci-context daemon repair --all --monitor dev
-oci-context daemon doctor
+oci-context daemon describe
 oci-context setup daemon --all --monitor dev
 oci-context tui
 ```
+
+The former short forms (`list`, `current`, `set`, `status`, `daemon up`,
+`daemon doctor`, and `daemon auth-status`) remain supported as compatibility
+aliases.
 
 ## Auth Readiness
 
@@ -468,11 +514,11 @@ oci-context daemon repair --all --monitor dev
 For a lightweight post-wake or pre-work check:
 
 ```bash
-oci-context daemon auth-status
+oci-context daemon status
 oci-context auth ensure --no-interactive
 ```
 
-`daemon auth-status` includes a daemon-specific readiness contract:
+`daemon status` includes a daemon-specific readiness contract:
 
 - `ready`: validation currently proves auth is usable.
 - `action_required`: something needs operator or automation action.
@@ -487,9 +533,9 @@ that were not freshly refreshed.
 Use structured daemon diagnostics for automation:
 
 ```bash
-oci-context daemon doctor --output json
+oci-context daemon describe --output json
 oci-context daemon nudge --output json
-oci-context daemon recover --output json
+oci-context daemon restart --output json
 ```
 
 ## OCI CLI Defaults
