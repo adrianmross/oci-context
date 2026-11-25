@@ -282,6 +282,16 @@ service config rather than storing it in the downstream tool. stdout contains
 the bearer token and must be treated as secret material; browser instructions
 are written to stderr.
 
+Use `--check-claims` to inspect the JWT issuer, expiration, and presence of
+named claims. The JSON summary omits the token and arbitrary claim values.
+It reports `signature_verified: false` because this diagnostic reads the
+payload without authenticating the token or checking its audience.
+
+```bash
+oci-context auth token --service example-service --no-login --check-claims \
+  --require-issuer https://issuer.example.com --require-claim roles
+```
+
 The default OBPCS cloud-service application is normally a CloudGate web
 application. Its redirect is service-owned, for example
 `https://<hostid>/cloudgate/v1/oauth2/callback`. That callback is correct for
@@ -368,6 +378,20 @@ OAuth tokens are cached by service and are reused under `--no-login` when still
 valid. Use `--no-cache` to force a fresh token request and avoid updating the
 cached token, for example when validating a new IDCS app, role grant, or signing
 key without disturbing a known-good cached token.
+
+The default cache is a local `0600` file. A macOS source build with cgo enabled
+can store tokens in the macOS Keychain. The prebuilt release binaries use
+`CGO_ENABLED=0` and support the file backend only. To select Keychain on a
+supported build:
+
+```bash
+oci-context auth cache use keychain
+oci-context auth cache status
+```
+
+The two caches are intentionally separate: switch back with `oci-context auth
+cache use file`, or run `auth token` once after switching to populate the newly
+selected cache. Tokens are never copied or printed by these commands.
 
 Inspect local metadata without calling OCI:
 

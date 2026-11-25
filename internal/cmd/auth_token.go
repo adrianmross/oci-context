@@ -100,6 +100,9 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 	var jwtAudience string
 	var jwtExpiresIn time.Duration
 	var format string
+	var checkClaims bool
+	var requireIssuer string
+	var requireClaims []string
 	var noLogin bool
 	var noBrowser bool
 	var noCache bool
@@ -109,6 +112,15 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 		Use:   "token",
 		Short: "Emit an access token for command handoff",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !checkClaims && (cmd.Flags().Changed("require-issuer") || cmd.Flags().Changed("require-claim")) {
+				return fmt.Errorf("--require-issuer and --require-claim require --check-claims")
+			}
+			if checkClaims {
+				if cmd.Flags().Changed("format") && !strings.EqualFold(format, "json") {
+					return fmt.Errorf("--check-claims requires JSON output")
+				}
+				format = "json"
+			}
 			path, err := resolvePath(cmd)
 			if err != nil {
 				return err
@@ -153,10 +165,13 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 				JWTExpiresIn:           jwtExpiresIn,
 				OfflineAccess:          offlineAccess,
 			}, authTokenRunOptions{
-				Format:    format,
-				NoLogin:   noLogin,
-				NoBrowser: noBrowser,
-				NoCache:   noCache,
+				Format:        format,
+				CheckClaims:   checkClaims,
+				RequireIssuer: requireIssuer,
+				RequireClaims: requireClaims,
+				NoLogin:       noLogin,
+				NoBrowser:     noBrowser,
+				NoCache:       noCache,
 			})
 		},
 	}
@@ -189,6 +204,9 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 	cmd.Flags().StringVar(&jwtAudience, "jwt-audience", "", "JWT audience claim for local signing; defaults to token endpoint")
 	cmd.Flags().DurationVar(&jwtExpiresIn, "jwt-expires-in", 5*time.Minute, "JWT lifetime for local signing")
 	cmd.Flags().StringVar(&format, "format", "raw", "Output format: raw|json")
+	cmd.Flags().BoolVar(&checkClaims, "check-claims", false, "Inspect unsigned JWT claims and emit JSON; does not authenticate the token")
+	cmd.Flags().StringVar(&requireIssuer, "require-issuer", "", "Expected JWT issuer; defaults to the token service issuer with --check-claims")
+	cmd.Flags().StringSliceVar(&requireClaims, "require-claim", nil, "Required JWT claim name; repeatable with --check-claims")
 	cmd.Flags().BoolVar(&noLogin, "no-login", false, "Fail instead of starting an interactive login")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the verification URL in a browser")
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Bypass cached OAuth tokens and do not update the token cache")
@@ -197,11 +215,14 @@ func newAuthTokenCmd(resolvePath authResolvePathFunc, loadTarget authLoadTargetF
 }
 
 type authTokenRunOptions struct {
-	Format      string
-	NoLogin     bool
-	NoBrowser   bool
-	NoCache     bool
-	LoginStatus bool
+	Format        string
+	CheckClaims   bool
+	RequireIssuer string
+	RequireClaims []string
+	NoLogin       bool
+	NoBrowser     bool
+	NoCache       bool
+	LoginStatus   bool
 }
 
 type tokenServiceOptions struct {
@@ -241,13 +262,15 @@ func runAuthToken(cmd *cobra.Command, cfg config.Config, ctx config.Context, opt
 	if err != nil {
 		return err
 	}
-	cachePath, err := authTokenCachePath(cfg, request.Service, request.Issuer, request.ClientID, request.Scope)
-	if err != nil {
-		return err
+	if runOpts.CheckClaims && runOpts.RequireIssuer == "" {
+		runOpts.RequireIssuer = request.Issuer
 	}
 	var entry authTokenCacheEntry
 	if !runOpts.NoCache {
-		entry, err = readAuthTokenCache(cachePath)
+		entry, err = readConfiguredAuthTokenCache(cfg, request.Service, request.Issuer, request.ClientID, request.Scope)
+		if err != nil && config.NormalizeOAuthTokenCache(cfg.Options.OAuthTokenCache) != config.OAuthTokenCacheFile && !os.IsNotExist(err) {
+			return err
+		}
 		if err == nil && authTokenUsable(entry) {
 			return finishAuthTokenRun(cmd, entry, runOpts, ctx, "Token service %s is already logged in\n")
 		}
@@ -257,7 +280,7 @@ func runAuthToken(cmd *cobra.Command, cfg config.Config, ctx config.Context, opt
 				oldRefreshToken := entry.RefreshToken
 				entry = cacheEntryFromToken(request, refreshed)
 				entry.RefreshToken = firstNonEmpty(refreshed.RefreshToken, oldRefreshToken)
-				if err := writeAuthTokenCache(cachePath, entry); err != nil {
+				if err := writeConfiguredAuthTokenCache(cfg, entry); err != nil {
 					return err
 				}
 				return finishAuthTokenRun(cmd, entry, runOpts, ctx, "Refreshed token service %s\n")
@@ -270,7 +293,7 @@ func runAuthToken(cmd *cobra.Command, cfg config.Config, ctx config.Context, opt
 			return err
 		}
 		if !runOpts.NoCache {
-			if err := writeAuthTokenCache(cachePath, entry); err != nil {
+			if err := writeConfiguredAuthTokenCache(cfg, entry); err != nil {
 				return err
 			}
 		}
@@ -284,7 +307,7 @@ func runAuthToken(cmd *cobra.Command, cfg config.Config, ctx config.Context, opt
 		return err
 	}
 	if !runOpts.NoCache {
-		if err := writeAuthTokenCache(cachePath, entry); err != nil {
+		if err := writeConfiguredAuthTokenCache(cfg, entry); err != nil {
 			return err
 		}
 	}
@@ -292,12 +315,94 @@ func runAuthToken(cmd *cobra.Command, cfg config.Config, ctx config.Context, opt
 }
 
 func finishAuthTokenRun(cmd *cobra.Command, entry authTokenCacheEntry, runOpts authTokenRunOptions, ctx config.Context, statusFormat string) error {
+	if runOpts.CheckClaims {
+		return checkAuthTokenClaims(cmd, entry, runOpts, ctx)
+	}
 	if runOpts.LoginStatus {
 		fmt.Fprintf(cmd.OutOrStdout(), statusFormat, entry.Service)
 		return nil
 	}
 	format := firstNonEmpty(runOpts.Format, "raw")
 	return printAuthToken(cmd, entry, format, ctx)
+}
+
+type authTokenClaimsSummary struct {
+	SignatureVerified bool            `json:"signature_verified"`
+	Service           string          `json:"service"`
+	Context           string          `json:"context,omitempty"`
+	Profile           string          `json:"profile,omitempty"`
+	Issuer            string          `json:"issuer"`
+	ExpectedIssuer    string          `json:"expected_issuer"`
+	ExpiresAt         string          `json:"expires_at"`
+	NotExpired        bool            `json:"not_expired"`
+	Claims            map[string]bool `json:"claims"`
+}
+
+func checkAuthTokenClaims(cmd *cobra.Command, entry authTokenCacheEntry, opts authTokenRunOptions, ctx config.Context) error {
+	if strings.ToLower(firstNonEmpty(opts.Format, "json")) != "json" {
+		return fmt.Errorf("--check-claims requires --format json so the token is never written to stdout")
+	}
+	parts := strings.Split(entry.AccessToken, ".")
+	if len(parts) != 3 {
+		return fmt.Errorf("access token is not a JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return fmt.Errorf("decode JWT payload: %w", err)
+	}
+	var claims map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return fmt.Errorf("decode JWT claims: %w", err)
+	}
+	var actualIssuer string
+	if err := json.Unmarshal(claims["iss"], &actualIssuer); err != nil || strings.TrimSpace(actualIssuer) == "" {
+		return fmt.Errorf("JWT issuer claim is required")
+	}
+	expectedIssuer := firstNonEmpty(opts.RequireIssuer, entry.Issuer)
+	if strings.TrimSpace(expectedIssuer) == "" {
+		return fmt.Errorf("expected issuer is required for --check-claims")
+	}
+	if actualIssuer != expectedIssuer {
+		return fmt.Errorf("JWT issuer does not match expected issuer")
+	}
+	var expiration json.Number
+	rawExpiry := claims["exp"]
+	if len(rawExpiry) == 0 || rawExpiry[0] == '"' {
+		return fmt.Errorf("JWT expiration claim must be a numeric date")
+	}
+	if err := json.Unmarshal(rawExpiry, &expiration); err != nil {
+		return fmt.Errorf("JWT expiration claim is required")
+	}
+	expiresUnix, err := expiration.Int64()
+	if err != nil {
+		return fmt.Errorf("JWT expiration claim is invalid")
+	}
+	expiresAt := time.Unix(expiresUnix, 0).UTC()
+	if !expiresAt.After(time.Now()) {
+		return fmt.Errorf("JWT is expired")
+	}
+	present := make(map[string]bool, len(opts.RequireClaims))
+	for _, claim := range opts.RequireClaims {
+		claim = strings.TrimSpace(claim)
+		if claim == "" {
+			return fmt.Errorf("required claim name must not be empty")
+		}
+		_, found := claims[claim]
+		present[claim] = found
+		if !found {
+			return fmt.Errorf("JWT required claim %q is missing", claim)
+		}
+	}
+	return json.NewEncoder(cmd.OutOrStdout()).Encode(authTokenClaimsSummary{
+		Service:        entry.Service,
+		Context:        ctx.Name,
+		Profile:        ctx.Profile,
+		Issuer:         actualIssuer,
+		ExpectedIssuer: expectedIssuer,
+		ExpiresAt:      expiresAt.Format(time.RFC3339),
+		NotExpired:     true,
+		Claims:         present,
+	})
 }
 
 type tokenServiceRequest struct {
@@ -1354,14 +1459,7 @@ func readAuthTokenCache(path string) (authTokenCacheEntry, error) {
 	if err != nil {
 		return authTokenCacheEntry{}, err
 	}
-	var entry authTokenCacheEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		return authTokenCacheEntry{}, err
-	}
-	if entry.AccessToken == "" {
-		return authTokenCacheEntry{}, fmt.Errorf("cached token is empty")
-	}
-	return entry, nil
+	return decodeAuthTokenCache(data)
 }
 
 func writeAuthTokenCache(path string, entry authTokenCacheEntry) error {

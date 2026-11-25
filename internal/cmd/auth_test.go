@@ -1067,6 +1067,74 @@ func TestAuthTokenNoInteractiveRequiresCachedToken(t *testing.T) {
 	}
 }
 
+func TestCheckAuthTokenClaimsOmitsTokenAndPrivateValues(t *testing.T) {
+	payload := fmt.Sprintf(`{"iss":"https://idcs.example.com","exp":%d,"roles":["fixture-role"]}`, time.Now().Add(time.Hour).Unix())
+	token := "header." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".signature"
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	err := checkAuthTokenClaims(cmd, authTokenCacheEntry{
+		AccessToken: token,
+		Service:     "example-service",
+		Issuer:      "https://idcs.example.com",
+	}, authTokenRunOptions{
+		Format:        "json",
+		CheckClaims:   true,
+		RequireClaims: []string{"roles"},
+	}, config.Context{Name: "qa", Profile: "QA"})
+	if err != nil {
+		t.Fatalf("verify token: %v", err)
+	}
+	if strings.Contains(out.String(), token) || strings.Contains(out.String(), "fixture-role") {
+		t.Fatalf("verification output exposed secret token or claim value: %s", out.String())
+	}
+	var result authTokenClaimsSummary
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode verification output: %v", err)
+	}
+	if result.SignatureVerified || result.Issuer != "https://idcs.example.com" || !result.NotExpired || !result.Claims["roles"] {
+		t.Fatalf("unexpected verification result: %+v", result)
+	}
+}
+
+func TestCheckAuthTokenClaimsFailsWithoutWritingToken(t *testing.T) {
+	now := time.Now().Unix()
+	for _, tc := range []struct {
+		name, issuer string
+		expiry       int64
+		required     string
+	}{
+		{"issuer", "https://other.example", now + 3600, ""},
+		{"expiration", "https://issuer.example", now - 3600, ""},
+		{"missing claim", "https://issuer.example", now + 3600, "roles"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			claims := fmt.Sprintf(`{"iss":%q,"exp":%d}`, tc.issuer, tc.expiry)
+			token := "fixture." + base64.RawURLEncoding.EncodeToString([]byte(claims)) + ".fixture"
+			cmd := &cobra.Command{}
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			err := checkAuthTokenClaims(cmd, authTokenCacheEntry{AccessToken: token, Issuer: "https://issuer.example"}, authTokenRunOptions{RequireClaims: []string{tc.required}}, config.Context{})
+			if err == nil || out.Len() != 0 || strings.Contains(err.Error(), token) {
+				t.Fatal("expected a redacted failure")
+			}
+		})
+	}
+}
+
+func TestAuthTokenClaimOptionsNeverFallBackToRaw(t *testing.T) {
+	for _, args := range [][]string{{"--require-claim", "roles"}, {"--require-issuer", "https://issuer.example"}, {"--check-claims", "--format", "raw"}} {
+		cmd := newRootCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(append([]string{"auth", "token"}, args...))
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--check-claims") {
+			t.Fatal("expected claim option validation before credential access")
+		}
+	}
+}
+
 func TestAuthMethodsCommandOutput(t *testing.T) {
 	cmd := newAuthCmd()
 	var out bytes.Buffer

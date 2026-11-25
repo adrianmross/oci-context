@@ -23,10 +23,11 @@ type Config struct {
 
 // Options holds global settings.
 type Options struct {
-	OCIConfigPath  string   `yaml:"oci_config_path" json:"oci_config_path"`
-	SocketPath     string   `yaml:"socket_path" json:"socket_path"`
-	DefaultProfile string   `yaml:"default_profile" json:"default_profile"`
-	DaemonContexts []string `yaml:"daemon_contexts,omitempty" json:"daemon_contexts,omitempty"`
+	OCIConfigPath   string   `yaml:"oci_config_path" json:"oci_config_path"`
+	SocketPath      string   `yaml:"socket_path" json:"socket_path"`
+	DefaultProfile  string   `yaml:"default_profile" json:"default_profile"`
+	DaemonContexts  []string `yaml:"daemon_contexts,omitempty" json:"daemon_contexts,omitempty"`
+	OAuthTokenCache string   `yaml:"oauth_token_cache,omitempty" json:"oauth_token_cache,omitempty"`
 }
 
 // Context describes a selectable OCI context.
@@ -107,7 +108,26 @@ type TokenService struct {
 const (
 	TokenServiceTypeOAuth       = "oauth"
 	TokenServiceTypeOAuthDevice = "oauth_device"
+	OAuthTokenCacheFile         = "file"
+	OAuthTokenCacheKeychain     = "keychain"
 )
+
+func NormalizeOAuthTokenCache(v string) string {
+	v = strings.TrimSpace(strings.ToLower(v))
+	if v == "" {
+		return OAuthTokenCacheFile
+	}
+	return v
+}
+
+func IsValidOAuthTokenCache(v string) bool {
+	switch NormalizeOAuthTokenCache(v) {
+	case OAuthTokenCacheFile, OAuthTokenCacheKeychain:
+		return true
+	default:
+		return false
+	}
+}
 
 var (
 	ErrContextNotFound = errors.New("context not found")

@@ -39,11 +39,7 @@ func newAuthSubjectCmd(resolvePath authResolvePathFunc, loadTarget authLoadTarge
 			if err != nil {
 				return err
 			}
-			cachePath, err := authTokenCachePath(cfg, request.Service, request.Issuer, request.ClientID, request.Scope)
-			if err != nil {
-				return err
-			}
-			entry, err := readAuthTokenCache(cachePath)
+			entry, err := readConfiguredAuthTokenCache(cfg, request.Service, request.Issuer, request.ClientID, request.Scope)
 			if err != nil {
 				return fmt.Errorf("read cached access token: %w", err)
 			}
